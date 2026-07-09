@@ -36,19 +36,28 @@ function findExecutableCompletions(prefix) {
   return matches;
 }
 
-// Find files in the current directory whose name starts with the given prefix.
+// Find files whose name starts with the given prefix. The prefix may contain
+// a path (e.g. "path/to/f"), in which case we search inside that directory
+// and return matches with the directory portion re-prepended (e.g.
+// "path/to/file.txt"), so the caller can treat the whole thing as one token.
 function findFilenameCompletions(prefix) {
   const matches = new Set();
+
+  const lastSlashIndex = prefix.lastIndexOf("/");
+  const dirPart = lastSlashIndex === -1 ? "" : prefix.slice(0, lastSlashIndex + 1);
+  const namePart = lastSlashIndex === -1 ? prefix : prefix.slice(lastSlashIndex + 1);
+  const searchDir = dirPart === "" ? "." : dirPart;
+
   let entries;
   try {
-    entries = fs.readdirSync(".");
+    entries = fs.readdirSync(searchDir);
   } catch {
     return matches;
   }
 
   for (const entry of entries) {
-    if (entry.startsWith(prefix)) {
-      matches.add(entry);
+    if (entry.startsWith(namePart)) {
+      matches.add(dirPart + entry);
     }
   }
 
