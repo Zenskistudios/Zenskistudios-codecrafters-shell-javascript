@@ -97,11 +97,12 @@ function parseInput(input) {
   return tokens;
 }
 
-// Scans tokens for '>', '1>', '2>' redirection and strips them out.
-// Returns { args, stdoutFile, stderrFile }.
+// Scans tokens for '>', '1>', '>>', '1>>', '2>' redirection and strips them out.
+// Returns { args, stdoutFile, stdoutAppend, stderrFile }.
 function extractRedirection(parts) {
   const args = [];
   let stdoutFile = null;
+  let stdoutAppend = false;
   let stderrFile = null;
 
   for (let i = 0; i < parts.length; i++) {
@@ -109,6 +110,11 @@ function extractRedirection(parts) {
 
     if (token === ">" || token === "1>") {
       stdoutFile = parts[i + 1];
+      stdoutAppend = false;
+      i++;
+    } else if (token === ">>" || token === "1>>") {
+      stdoutFile = parts[i + 1];
+      stdoutAppend = true;
       i++;
     } else if (token === "2>") {
       stderrFile = parts[i + 1];
@@ -118,7 +124,7 @@ function extractRedirection(parts) {
     }
   }
 
-  return { args, stdoutFile, stderrFile };
+  return { args, stdoutFile, stdoutAppend, stderrFile };
 }
 
 startShell();
@@ -131,7 +137,7 @@ rl.on("line", (input) => {
     return;
   }
 
-  const { args: parts, stdoutFile, stderrFile } = extractRedirection(rawParts);
+  const { args: parts, stdoutFile, stdoutAppend, stderrFile } = extractRedirection(rawParts);
 
   if (parts.length === 0) {
     startShell();
@@ -141,10 +147,24 @@ rl.on("line", (input) => {
   const command = parts[0];
   const args = parts.slice(1);
 
-  // Ensure a redirect target file exists/is truncated, even if nothing
-  // ends up being written to it (matches real shell behavior).
-  function touchFile(file) {
-    fs.writeFileSync(file, "");
+  // Ensure a redirect target exists. For '>' we truncate now (in case
+  // nothing gets written); for '>>' we only create it if missing.
+  // Returns true on success, false if the target couldn't be prepared
+  // (e.g. the parent directory doesn't exist).
+  function touchFile(file, append) {
+    try {
+      if (append) {
+        if (!fs.existsSync(file)) {
+          fs.writeFileSync(file, "");
+        }
+      } else {
+        fs.writeFileSync(file, "");
+      }
+      return true;
+    } catch {
+      console.error(`${command}: ${file}: No such file or directory`);
+      return false;
+    }
   }
 
   function writeStdout(text) {
@@ -163,8 +183,19 @@ rl.on("line", (input) => {
     }
   }
 
-  if (stdoutFile) touchFile(stdoutFile);
-  if (stderrFile) touchFile(stderrFile);
+  if (stdoutFile) {
+    if (!touchFile(stdoutFile, stdoutAppend)) {
+      startShell();
+      return;
+    }
+  }
+
+  if (stderrFile) {
+    if (!touchFile(stderrFile, false)) {
+      startShell();
+      return;
+    }
+  }
 
   if (command === "exit") {
     rl.close();
@@ -223,16 +254,22 @@ rl.on("line", (input) => {
   const executable = findExecutable(command);
 
   if (executable) {
-    const stdoutFd = stdoutFile ? fs.openSync(stdoutFile, "w") : "inherit";
-    const stderrFd = stderrFile ? fs.openSync(stderrFile, "w") : "inherit";
+    try {
+      const stdoutMode = stdoutAppend ? "a" : "w";
+      const stdoutFd = stdoutFile ? fs.openSync(stdoutFile, stdoutMode) : "inherit";
+      const stderrFd = stderrFile ? fs.openSync(stderrFile, "w") : "inherit";
 
-    spawnSync(executable, args, {
-      stdio: ["inherit", stdoutFd, stderrFd],
-      argv0: command,
-    });
+      spawnSync(executable, args, {
+        stdio: ["inherit", stdoutFd, stderrFd],
+        argv0: command,
+      });
 
-    if (typeof stdoutFd === "number") fs.closeSync(stdoutFd);
-    if (typeof stderrFd === "number") fs.closeSync(stderrFd);
+      if (typeof stdoutFd === "number") fs.closeSync(stdoutFd);
+      if (typeof stderrFd === "number") fs.closeSync(stderrFd);
+    } catch {
+      const badFile = stdoutFile || stderrFile;
+      console.error(`${command}: ${badFile}: No such file or directory`);
+    }
   } else {
     writeStderr(`${command}: command not found`);
   }
