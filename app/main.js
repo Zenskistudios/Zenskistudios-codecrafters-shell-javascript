@@ -6,9 +6,13 @@ const rl = readline.createInterface({
   prompt: "$ ",
 });
 
-rl.prompt();
-
-rl.on("line", (command) => {
-  console.log(`${command}: command not found`);
+function prompt() {
   rl.prompt();
+}
+
+prompt();
+
+rl.on("line", (line) => {
+  console.log(`${line}: command not found`);
+  prompt();
 });
