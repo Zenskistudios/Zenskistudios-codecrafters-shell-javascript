@@ -422,6 +422,18 @@ rl.on("line", (input) => {
     return;
   }
 
+  if (command === "complete") {
+    if (args[0] === "-p") {
+      const target = args[1];
+      // No completion specifications are tracked yet, so any target is
+      // reported as having none registered.
+      writeStderr(`complete: ${target}: no completion specification`);
+    }
+
+    startShell();
+    return;
+  }
+
   const executable = findExecutable(command);
 
   if (executable) {
