@@ -3,13 +3,26 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
+const builtins = ["echo", "exit", "type", "pwd", "cd"];
+
+// Tab-completion: only echo and exit are completable in this stage.
+function completer(line) {
+  const completable = ["echo", "exit"];
+  const hits = completable.filter((c) => c.startsWith(line));
+
+  if (hits.length === 1) {
+    return [[hits[0] + " "], line];
+  }
+
+  return [hits, line];
+}
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
   prompt: "$ ",
+  completer,
 });
-
-const builtins = ["echo", "exit", "type", "pwd", "cd"];
 
 function startShell() {
   rl.prompt();
