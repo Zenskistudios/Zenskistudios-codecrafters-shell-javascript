@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const builtins = ["echo", "exit", "type", "pwd", "cd"];
+const builtins = ["echo", "exit", "type", "pwd", "cd", "complete"];
 
 // Find executable names in PATH whose name starts with the given prefix.
 // Handles PATH entries that point to nonexistent directories gracefully.
