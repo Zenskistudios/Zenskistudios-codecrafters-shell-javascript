@@ -38,7 +38,7 @@ function findExecutableCompletions(prefix) {
 
 // Tracks state between consecutive Tab presses on the same (unchanged) line,
 // so we know whether this is the first ambiguous press (ring bell) or a
-// repeat press (let readline's built-in behavior list the candidates).
+// repeat press (print the candidate list ourselves).
 let lastAmbiguousLine = null;
 
 // Tab-completion: builtins (echo, exit) plus any matching executables in PATH.
@@ -71,10 +71,16 @@ function completer(line) {
     return [[], line];
   }
 
-  // Second (or later) Tab press for the same line: let readline's
-  // built-in behavior print the sorted candidate list and redraw the
-  // prompt with the original prefix preserved.
-  return [hits, line];
+  // Second (or later) Tab press for the same line: print the sorted
+  // candidates ourselves on a single line, double-space separated, then
+  // redraw the prompt with the original prefix preserved. We do this
+  // manually (rather than letting readline's built-in multi-column
+  // printer handle it) because that printer lays candidates out in a
+  // grid based on terminal width, which can put each candidate on its
+  // own line instead of a single space-separated row.
+  process.stdout.write("\n" + hits.join("  ") + "\n");
+  rl._refreshLine();
+  return [[], line];
 }
 
 const rl = readline.createInterface({
