@@ -1,6 +1,7 @@
 const readline = require("readline");
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -14,57 +15,70 @@ function startShell() {
   rl.prompt();
 }
 
+function findExecutable(command) {
+  const paths = process.env.PATH.split(path.delimiter);
+
+  for (const dir of paths) {
+    const fullPath = path.join(dir, command);
+
+    try {
+      fs.accessSync(fullPath, fs.constants.X_OK);
+      return fullPath;
+    } catch {
+      // Keep searching
+    }
+  }
+
+  return null;
+}
+
 startShell();
 
-rl.on("line", (command) => {
+rl.on("line", (input) => {
+  const parts = input.trim().split(/\s+/);
+  const command = parts[0];
+  const args = parts.slice(1);
+
   if (command === "exit") {
     rl.close();
     return;
   }
 
-  if (command.startsWith("echo ")) {
-    console.log(command.slice(5));
+  if (command === "echo") {
+    console.log(args.join(" "));
     startShell();
     return;
   }
 
-  if (command.startsWith("type ")) {
-    const cmd = command.slice(5);
+  if (command === "type") {
+    const cmd = args[0];
 
-    // Check builtins
     if (builtins.includes(cmd)) {
       console.log(`${cmd} is a shell builtin`);
-      startShell();
-      return;
-    }
+    } else {
+      const executable = findExecutable(cmd);
 
-    // Search PATH
-    const paths = process.env.PATH.split(path.delimiter);
-
-    let found = false;
-
-    for (const dir of paths) {
-      const fullPath = path.join(dir, cmd);
-
-      try {
-        fs.accessSync(fullPath, fs.constants.X_OK);
-        console.log(`${cmd} is ${fullPath}`);
-        found = true;
-        break;
-      } catch (err) {
-        // Ignore and continue searching
+      if (executable) {
+        console.log(`${cmd} is ${executable}`);
+      } else {
+        console.log(`${cmd}: not found`);
       }
     }
 
-    if (!found) {
-      console.log(`${cmd}: not found`);
-    }
-
     startShell();
     return;
   }
 
-  console.log(`${command}: command not found`);
+  const executable = findExecutable(command);
+
+  if (executable) {
+    spawnSync(executable, args, {
+      stdio: "inherit",
+    });
+  } else {
+    console.log(`${command}: command not found`);
+  }
+
   startShell();
 });
 
