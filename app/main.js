@@ -5,6 +5,10 @@ const { spawnSync } = require("child_process");
 
 const builtins = ["echo", "exit", "type", "pwd", "cd", "complete"];
 
+// Registered completion specs from `complete -C <script> <command>`,
+// keyed by command name -> completer script path.
+const completionSpecs = new Map();
+
 // Find executable names in PATH whose name starts with the given prefix.
 // Handles PATH entries that point to nonexistent directories gracefully.
 function findExecutableCompletions(prefix) {
@@ -423,11 +427,18 @@ rl.on("line", (input) => {
   }
 
   if (command === "complete") {
-    if (args[0] === "-p") {
+    if (args[0] === "-C") {
+      const scriptPath = args[1];
+      const targetCommand = args[2];
+      completionSpecs.set(targetCommand, scriptPath);
+    } else if (args[0] === "-p") {
       const target = args[1];
-      // No completion specifications are tracked yet, so any target is
-      // reported as having none registered.
-      writeStderr(`complete: ${target}: no completion specification`);
+      if (completionSpecs.has(target)) {
+        writeStdout(`complete -C '${completionSpecs.get(target)}' ${target}`);
+      } else {
+        // No completion specification registered for this command.
+        writeStderr(`complete: ${target}: no completion specification`);
+      }
     }
 
     startShell();
