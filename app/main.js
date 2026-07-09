@@ -14,6 +14,12 @@ function completer(line) {
     return [[hits[0] + " "], line];
   }
 
+  if (hits.length === 0) {
+    // No matches: leave input unchanged, ring the terminal bell.
+    process.stdout.write("\x07");
+    return [[], line];
+  }
+
   return [hits, line];
 }
 
