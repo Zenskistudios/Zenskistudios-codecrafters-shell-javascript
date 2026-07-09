@@ -6,13 +6,21 @@ const rl = readline.createInterface({
   prompt: "$ ",
 });
 
-function prompt() {
+function startShell() {
   rl.prompt();
 }
 
-prompt();
+startShell();
 
-rl.on("line", (line) => {
-  console.log(`${line}: command not found`);
-  prompt();
+rl.on("line", (command) => {
+  if (command === "exit") {
+    rl.close();
+  } else {
+    console.log(`${command}: command not found`);
+    startShell();
+  }
+});
+
+rl.on("close", () => {
+  process.exit(0);
 });
