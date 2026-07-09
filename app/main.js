@@ -60,6 +60,17 @@ function parseInput(input) {
       continue;
     }
 
+    if (char === "\\") {
+      // Backslash outside quotes escapes the very next character.
+      if (i + 1 < input.length) {
+        current += input[i + 1];
+        i++;
+        tokenStarted = true;
+      }
+      // A trailing lone backslash with nothing after it is simply dropped.
+      continue;
+    }
+
     if (char === "'") {
       inSingleQuote = true;
       tokenStarted = true;
