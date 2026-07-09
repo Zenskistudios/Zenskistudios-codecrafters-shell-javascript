@@ -132,7 +132,9 @@ function resolveCompletion(hits, matchText, getSuffix = () => " ") {
   // built-in multi-column printer handle it) because that printer lays
   // candidates out in a grid based on terminal width, which can put each
   // candidate on its own line instead of a single space-separated row.
-  process.stdout.write("\n" + hits.join("  ") + "\n");
+  // Directories are shown with a trailing "/"; files are shown as-is.
+  const displayHits = hits.map((hit) => (getSuffix(hit) === "/" ? hit + "/" : hit));
+  process.stdout.write("\n" + displayHits.join("  ") + "\n");
   rl._refreshLine();
   return [[], matchText];
 }
