@@ -74,6 +74,7 @@ rl.on("line", (input) => {
   if (executable) {
     spawnSync(executable, args, {
       stdio: "inherit",
+      argv0: command,
     });
   } else {
     console.log(`${command}: command not found`);
