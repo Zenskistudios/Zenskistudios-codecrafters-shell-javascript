@@ -9,7 +9,7 @@ const rl = readline.createInterface({
   prompt: "$ ",
 });
 
-const builtins = ["echo", "exit", "type", "pwd"];
+const builtins = ["echo", "exit", "type", "pwd", "cd"];
 
 function startShell() {
   rl.prompt();
@@ -52,6 +52,19 @@ rl.on("line", (input) => {
 
   if (command === "pwd") {
     console.log(process.cwd());
+    startShell();
+    return;
+  }
+
+  if (command === "cd") {
+    const target = args[0];
+
+    try {
+      process.chdir(target);
+    } catch {
+      console.log(`cd: ${target}: No such file or directory`);
+    }
+
     startShell();
     return;
   }
