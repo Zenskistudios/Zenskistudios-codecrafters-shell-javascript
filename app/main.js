@@ -32,10 +32,56 @@ function findExecutable(command) {
   return null;
 }
 
+function parseInput(input) {
+  const tokens = [];
+  let current = "";
+  let inSingleQuote = false;
+  let tokenStarted = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+
+    if (inSingleQuote) {
+      if (char === "'") {
+        inSingleQuote = false;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'") {
+      inSingleQuote = true;
+      tokenStarted = true;
+    } else if (/\s/.test(char)) {
+      if (tokenStarted) {
+        tokens.push(current);
+        current = "";
+        tokenStarted = false;
+      }
+    } else {
+      current += char;
+      tokenStarted = true;
+    }
+  }
+
+  if (tokenStarted) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
 startShell();
 
 rl.on("line", (input) => {
-  const parts = input.trim().split(/\s+/);
+  const parts = parseInput(input);
+
+  if (parts.length === 0) {
+    startShell();
+    return;
+  }
+
   const command = parts[0];
   const args = parts.slice(1);
 
@@ -57,7 +103,7 @@ rl.on("line", (input) => {
   }
 
   if (command === "cd") {
-    let target = args[0];
+    let target = args[0] === undefined ? process.env.HOME : args[0];
 
     if (target === "~") {
       target = process.env.HOME;
