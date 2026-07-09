@@ -9,7 +9,7 @@ const rl = readline.createInterface({
   prompt: "$ ",
 });
 
-const builtins = ["echo", "exit", "type"];
+const builtins = ["echo", "exit", "type", "pwd"];
 
 function startShell() {
   rl.prompt();
@@ -46,6 +46,12 @@ rl.on("line", (input) => {
 
   if (command === "echo") {
     console.log(args.join(" "));
+    startShell();
+    return;
+  }
+
+  if (command === "pwd") {
+    console.log(process.cwd());
     startShell();
     return;
   }
