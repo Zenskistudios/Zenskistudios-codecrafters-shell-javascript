@@ -97,24 +97,28 @@ function parseInput(input) {
   return tokens;
 }
 
-// Scans tokens for '>' or '1>' redirection and strips them out.
-// Returns { args, stdoutFile }.
+// Scans tokens for '>', '1>', '2>' redirection and strips them out.
+// Returns { args, stdoutFile, stderrFile }.
 function extractRedirection(parts) {
   const args = [];
   let stdoutFile = null;
+  let stderrFile = null;
 
   for (let i = 0; i < parts.length; i++) {
     const token = parts[i];
 
     if (token === ">" || token === "1>") {
       stdoutFile = parts[i + 1];
-      i++; // skip the filename token
+      i++;
+    } else if (token === "2>") {
+      stderrFile = parts[i + 1];
+      i++;
     } else {
       args.push(token);
     }
   }
 
-  return { args, stdoutFile };
+  return { args, stdoutFile, stderrFile };
 }
 
 startShell();
@@ -127,7 +131,7 @@ rl.on("line", (input) => {
     return;
   }
 
-  const { args: parts, stdoutFile } = extractRedirection(rawParts);
+  const { args: parts, stdoutFile, stderrFile } = extractRedirection(rawParts);
 
   if (parts.length === 0) {
     startShell();
@@ -137,8 +141,13 @@ rl.on("line", (input) => {
   const command = parts[0];
   const args = parts.slice(1);
 
-  // Helper: write a line either to the redirected file or to stdout.
-  function writeOutput(text) {
+  // Ensure a redirect target file exists/is truncated, even if nothing
+  // ends up being written to it (matches real shell behavior).
+  function touchFile(file) {
+    fs.writeFileSync(file, "");
+  }
+
+  function writeStdout(text) {
     if (stdoutFile) {
       fs.appendFileSync(stdoutFile, text + "\n");
     } else {
@@ -146,24 +155,30 @@ rl.on("line", (input) => {
     }
   }
 
+  function writeStderr(text) {
+    if (stderrFile) {
+      fs.appendFileSync(stderrFile, text + "\n");
+    } else {
+      console.error(text);
+    }
+  }
+
+  if (stdoutFile) touchFile(stdoutFile);
+  if (stderrFile) touchFile(stderrFile);
+
   if (command === "exit") {
     rl.close();
     return;
   }
 
   if (command === "echo") {
-    if (stdoutFile) {
-      // Create/truncate the file first, then write.
-      fs.writeFileSync(stdoutFile, args.join(" ") + "\n");
-    } else {
-      console.log(args.join(" "));
-    }
+    writeStdout(args.join(" "));
     startShell();
     return;
   }
 
   if (command === "pwd") {
-    writeOutput(process.cwd());
+    writeStdout(process.cwd());
     startShell();
     return;
   }
@@ -180,7 +195,7 @@ rl.on("line", (input) => {
     try {
       process.chdir(target);
     } catch {
-      console.log(`cd: ${args[0]}: No such file or directory`);
+      writeStderr(`cd: ${args[0]}: No such file or directory`);
     }
 
     startShell();
@@ -189,16 +204,18 @@ rl.on("line", (input) => {
 
   if (command === "type") {
     const cmd = args[0];
-    let output;
 
     if (builtins.includes(cmd)) {
-      output = `${cmd} is a shell builtin`;
+      writeStdout(`${cmd} is a shell builtin`);
     } else {
       const executable = findExecutable(cmd);
-      output = executable ? `${cmd} is ${executable}` : `${cmd}: not found`;
+      if (executable) {
+        writeStdout(`${cmd} is ${executable}`);
+      } else {
+        writeStderr(`${cmd}: not found`);
+      }
     }
 
-    writeOutput(output);
     startShell();
     return;
   }
@@ -206,22 +223,18 @@ rl.on("line", (input) => {
   const executable = findExecutable(command);
 
   if (executable) {
-    let stdoutFd = "inherit";
-
-    if (stdoutFile) {
-      stdoutFd = fs.openSync(stdoutFile, "w");
-    }
+    const stdoutFd = stdoutFile ? fs.openSync(stdoutFile, "w") : "inherit";
+    const stderrFd = stderrFile ? fs.openSync(stderrFile, "w") : "inherit";
 
     spawnSync(executable, args, {
-      stdio: ["inherit", stdoutFd, "inherit"],
+      stdio: ["inherit", stdoutFd, stderrFd],
       argv0: command,
     });
 
-    if (typeof stdoutFd === "number") {
-      fs.closeSync(stdoutFd);
-    }
+    if (typeof stdoutFd === "number") fs.closeSync(stdoutFd);
+    if (typeof stderrFd === "number") fs.closeSync(stderrFd);
   } else {
-    console.log(`${command}: command not found`);
+    writeStderr(`${command}: command not found`);
   }
 
   startShell();
