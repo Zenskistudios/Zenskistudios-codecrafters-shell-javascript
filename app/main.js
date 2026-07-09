@@ -54,6 +54,10 @@ function parseInput(input) {
     if (inDoubleQuote) {
       if (char === '"') {
         inDoubleQuote = false;
+      } else if (char === "\\" && i + 1 < input.length && ['"', "\\", "$", "`"].includes(input[i + 1])) {
+        // Backslash only escapes ", \, $, ` inside double quotes.
+        current += input[i + 1];
+        i++;
       } else {
         current += char;
       }
@@ -67,7 +71,6 @@ function parseInput(input) {
         i++;
         tokenStarted = true;
       }
-      // A trailing lone backslash with nothing after it is simply dropped.
       continue;
     }
 
