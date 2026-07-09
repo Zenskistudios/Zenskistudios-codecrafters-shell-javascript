@@ -36,6 +36,7 @@ function parseInput(input) {
   const tokens = [];
   let current = "";
   let inSingleQuote = false;
+  let inDoubleQuote = false;
   let tokenStarted = false;
 
   for (let i = 0; i < input.length; i++) {
@@ -50,8 +51,20 @@ function parseInput(input) {
       continue;
     }
 
+    if (inDoubleQuote) {
+      if (char === '"') {
+        inDoubleQuote = false;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
     if (char === "'") {
       inSingleQuote = true;
+      tokenStarted = true;
+    } else if (char === '"') {
+      inDoubleQuote = true;
       tokenStarted = true;
     } else if (/\s/.test(char)) {
       if (tokenStarted) {
