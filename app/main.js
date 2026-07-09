@@ -92,10 +92,13 @@ let lastAmbiguousLine = null;
 // result, given the text that should be replaced (either the whole line, when
 // completing a command name, or just the last word, when completing a
 // filename argument).
-function resolveCompletion(hits, matchText) {
+// getSuffix(hit) determines what to append after a single unambiguous match:
+// a space for a file/command, or a trailing slash (no space) for a directory.
+// Defaults to always appending a space (used for command-name completion).
+function resolveCompletion(hits, matchText, getSuffix = () => " ") {
   if (hits.length === 1) {
     lastAmbiguousLine = null;
-    return [[hits[0] + " "], matchText];
+    return [[hits[0] + getSuffix(hits[0])], matchText];
   }
 
   if (hits.length === 0) {
@@ -155,7 +158,17 @@ function completer(line) {
   const prefix = line.slice(lastSpaceIndex + 1);
   const fileHits = Array.from(findFilenameCompletions(prefix)).sort();
 
-  return resolveCompletion(fileHits, prefix);
+  // Directories get a trailing "/" (no space) so the user can immediately
+  // tab again into the next path segment; files get a trailing space.
+  const getSuffix = (hit) => {
+    try {
+      return fs.statSync(hit).isDirectory() ? "/" : " ";
+    } catch {
+      return " ";
+    }
+  };
+
+  return resolveCompletion(fileHits, prefix, getSuffix);
 }
 
 const rl = readline.createInterface({
