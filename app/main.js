@@ -97,13 +97,14 @@ function parseInput(input) {
   return tokens;
 }
 
-// Scans tokens for '>', '1>', '>>', '1>>', '2>' redirection and strips them out.
-// Returns { args, stdoutFile, stdoutAppend, stderrFile }.
+// Scans tokens for '>', '1>', '>>', '1>>', '2>', '2>>' redirection and strips them out.
+// Returns { args, stdoutFile, stdoutAppend, stderrFile, stderrAppend }.
 function extractRedirection(parts) {
   const args = [];
   let stdoutFile = null;
   let stdoutAppend = false;
   let stderrFile = null;
+  let stderrAppend = false;
 
   for (let i = 0; i < parts.length; i++) {
     const token = parts[i];
@@ -118,13 +119,18 @@ function extractRedirection(parts) {
       i++;
     } else if (token === "2>") {
       stderrFile = parts[i + 1];
+      stderrAppend = false;
+      i++;
+    } else if (token === "2>>") {
+      stderrFile = parts[i + 1];
+      stderrAppend = true;
       i++;
     } else {
       args.push(token);
     }
   }
 
-  return { args, stdoutFile, stdoutAppend, stderrFile };
+  return { args, stdoutFile, stdoutAppend, stderrFile, stderrAppend };
 }
 
 startShell();
@@ -137,7 +143,7 @@ rl.on("line", (input) => {
     return;
   }
 
-  const { args: parts, stdoutFile, stdoutAppend, stderrFile } = extractRedirection(rawParts);
+  const { args: parts, stdoutFile, stdoutAppend, stderrFile, stderrAppend } = extractRedirection(rawParts);
 
   if (parts.length === 0) {
     startShell();
@@ -147,10 +153,10 @@ rl.on("line", (input) => {
   const command = parts[0];
   const args = parts.slice(1);
 
-  // Ensure a redirect target exists. For '>' we truncate now (in case
-  // nothing gets written); for '>>' we only create it if missing.
-  // Returns true on success, false if the target couldn't be prepared
-  // (e.g. the parent directory doesn't exist).
+  // Ensure a redirect target exists. For non-append mode we truncate now
+  // (in case nothing gets written); for append mode we only create it if
+  // missing. Returns true on success, false if the target couldn't be
+  // prepared (e.g. the parent directory doesn't exist).
   function touchFile(file, append) {
     try {
       if (append) {
@@ -191,7 +197,7 @@ rl.on("line", (input) => {
   }
 
   if (stderrFile) {
-    if (!touchFile(stderrFile, false)) {
+    if (!touchFile(stderrFile, stderrAppend)) {
       startShell();
       return;
     }
@@ -256,8 +262,9 @@ rl.on("line", (input) => {
   if (executable) {
     try {
       const stdoutMode = stdoutAppend ? "a" : "w";
+      const stderrMode = stderrAppend ? "a" : "w";
       const stdoutFd = stdoutFile ? fs.openSync(stdoutFile, stdoutMode) : "inherit";
-      const stderrFd = stderrFile ? fs.openSync(stderrFile, "w") : "inherit";
+      const stderrFd = stderrFile ? fs.openSync(stderrFile, stderrMode) : "inherit";
 
       spawnSync(executable, args, {
         stdio: ["inherit", stdoutFd, stderrFd],
