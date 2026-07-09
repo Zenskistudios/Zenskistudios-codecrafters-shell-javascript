@@ -57,12 +57,18 @@ rl.on("line", (input) => {
   }
 
   if (command === "cd") {
-    const target = args[0];
+    let target = args[0];
+
+    if (target === "~") {
+      target = process.env.HOME;
+    } else if (target.startsWith("~/")) {
+      target = path.join(process.env.HOME, target.slice(2));
+    }
 
     try {
       process.chdir(target);
     } catch {
-      console.log(`cd: ${target}: No such file or directory`);
+      console.log(`cd: ${args[0]}: No such file or directory`);
     }
 
     startShell();
