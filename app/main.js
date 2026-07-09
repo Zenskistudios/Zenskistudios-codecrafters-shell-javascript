@@ -5,10 +5,46 @@ const { spawnSync } = require("child_process");
 
 const builtins = ["echo", "exit", "type", "pwd", "cd"];
 
-// Tab-completion: only echo and exit are completable in this stage.
+// Find executable names in PATH whose name starts with the given prefix.
+// Handles PATH entries that point to nonexistent directories gracefully.
+function findExecutableCompletions(prefix) {
+  const paths = process.env.PATH.split(path.delimiter);
+  const matches = new Set();
+
+  for (const dir of paths) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      // Directory doesn't exist or isn't readable; skip it.
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.startsWith(prefix)) continue;
+
+      const fullPath = path.join(dir, entry);
+      try {
+        fs.accessSync(fullPath, fs.constants.X_OK);
+        matches.add(entry);
+      } catch {
+        // Not executable; skip it.
+      }
+    }
+  }
+
+  return matches;
+}
+
+// Tab-completion: builtins (echo, exit) plus any matching executables in PATH.
 function completer(line) {
-  const completable = ["echo", "exit"];
-  const hits = completable.filter((c) => c.startsWith(line));
+  const completableBuiltins = ["echo", "exit"];
+  const builtinHits = completableBuiltins.filter((c) => c.startsWith(line));
+
+  const execHits = line.length > 0 ? findExecutableCompletions(line) : new Set();
+
+  const allHits = new Set([...builtinHits, ...execHits]);
+  const hits = Array.from(allHits).sort();
 
   if (hits.length === 1) {
     return [[hits[0] + " "], line];
