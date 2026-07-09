@@ -36,6 +36,25 @@ function findExecutableCompletions(prefix) {
   return matches;
 }
 
+// Computes the longest string that is a prefix of every string in `strs`.
+function longestCommonPrefix(strs) {
+  if (strs.length === 0) return "";
+
+  let prefix = strs[0];
+
+  for (let i = 1; i < strs.length; i++) {
+    const candidate = strs[i];
+    let j = 0;
+    while (j < prefix.length && j < candidate.length && prefix[j] === candidate[j]) {
+      j++;
+    }
+    prefix = prefix.slice(0, j);
+    if (prefix.length === 0) break;
+  }
+
+  return prefix;
+}
+
 // Tracks state between consecutive Tab presses on the same (unchanged) line,
 // so we know whether this is the first ambiguous press (ring bell) or a
 // repeat press (print the candidate list ourselves).
@@ -63,7 +82,17 @@ function completer(line) {
     return [[], line];
   }
 
-  // Multiple matches (ambiguous).
+  // Multiple matches. First see if they share a longer common prefix
+  // than what's already typed — if so, complete up to that prefix
+  // (no trailing space, since it's not necessarily a full match yet).
+  const lcp = longestCommonPrefix(hits);
+
+  if (lcp.length > line.length) {
+    lastAmbiguousLine = null;
+    return [[lcp], line];
+  }
+
+  // No further common-prefix extension is possible: truly ambiguous.
   if (lastAmbiguousLine !== line) {
     // First Tab press for this line: ring the bell, don't list yet.
     lastAmbiguousLine = line;
