@@ -36,6 +36,11 @@ function findExecutableCompletions(prefix) {
   return matches;
 }
 
+// Tracks state between consecutive Tab presses on the same (unchanged) line,
+// so we know whether this is the first ambiguous press (ring bell) or a
+// repeat press (let readline's built-in behavior list the candidates).
+let lastAmbiguousLine = null;
+
 // Tab-completion: builtins (echo, exit) plus any matching executables in PATH.
 function completer(line) {
   const completableBuiltins = ["echo", "exit"];
@@ -47,15 +52,28 @@ function completer(line) {
   const hits = Array.from(allHits).sort();
 
   if (hits.length === 1) {
+    lastAmbiguousLine = null;
     return [[hits[0] + " "], line];
   }
 
   if (hits.length === 0) {
+    lastAmbiguousLine = null;
     // No matches: leave input unchanged, ring the terminal bell.
     process.stdout.write("\x07");
     return [[], line];
   }
 
+  // Multiple matches (ambiguous).
+  if (lastAmbiguousLine !== line) {
+    // First Tab press for this line: ring the bell, don't list yet.
+    lastAmbiguousLine = line;
+    process.stdout.write("\x07");
+    return [[], line];
+  }
+
+  // Second (or later) Tab press for the same line: let readline's
+  // built-in behavior print the sorted candidate list and redraw the
+  // prompt with the original prefix preserved.
   return [hits, line];
 }
 
@@ -208,10 +226,6 @@ rl.on("line", (input) => {
   const command = parts[0];
   const args = parts.slice(1);
 
-  // Ensure a redirect target exists. For non-append mode we truncate now
-  // (in case nothing gets written); for append mode we only create it if
-  // missing. Returns true on success, false if the target couldn't be
-  // prepared (e.g. the parent directory doesn't exist).
   function touchFile(file, append) {
     try {
       if (append) {
