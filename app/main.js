@@ -441,6 +441,145 @@ function extractRedirection(parts) {
   return { args, stdoutFile, stdoutAppend, stderrFile, stderrAppend };
 }
 
+// Executes a pipeline of two or more external commands, connecting each
+// command's stdout to the next command's stdin with a real (streaming)
+// pipe. Uses `spawn` rather than `spawnSync` for every stage so that
+// long-lived producers (e.g. `tail -f`) can keep streaming output through
+// the pipe while downstream consumers (e.g. `head`) read it live, instead
+// of blocking the event loop until the whole pipeline finishes.
+//
+// Each segment's own redirection (`>`, `>>`, `2>`, etc.) is honored
+// independently: if a segment specifies a file for a stream, that file
+// wins over the pipe connection for that stream (matching bash, where the
+// last redirection/connection for a given fd applies). Otherwise the first
+// command's stdin is inherited from the shell, the last command's stdout is
+// inherited, and every other stream in between flows through pipes.
+//
+// The shell only waits on the LAST command's `close` event before printing
+// the next prompt — mirroring real bash, where `cmd1 | cmd2` returns to the
+// prompt as soon as `cmd2` (the foreground process group's tail) finishes,
+// even if `cmd1` lingers momentarily until it gets SIGPIPE'd by the kernel.
+function runPipeline(segments) {
+  const parsedCommands = segments.map((segment) => extractRedirection(segment));
+
+  const resolved = [];
+  for (const parsed of parsedCommands) {
+    const cmdName = parsed.args[0];
+
+    if (!cmdName) {
+      // Empty segment (e.g. stray "||" or trailing "|"); nothing to run.
+      startShell();
+      return;
+    }
+
+    const executable = findExecutable(cmdName);
+    if (!executable) {
+      console.error(`${cmdName}: command not found`);
+      startShell();
+      return;
+    }
+
+    resolved.push({
+      ...parsed,
+      command: cmdName,
+      executable,
+      cmdArgs: parsed.args.slice(1),
+    });
+  }
+
+  const openedFds = [];
+
+  function openFd(file, append) {
+    try {
+      const fd = fs.openSync(file, append ? "a" : "w");
+      openedFds.push(fd);
+      return fd;
+    } catch {
+      return null;
+    }
+  }
+
+  function closeOpenedFds() {
+    for (const fd of openedFds) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Already closed; ignore.
+      }
+    }
+  }
+
+  const children = [];
+
+  for (let i = 0; i < resolved.length; i++) {
+    const cmd = resolved[i];
+    const isFirst = i === 0;
+    const isLast = i === resolved.length - 1;
+
+    let stdinOpt = isFirst ? "inherit" : "pipe";
+    let stdoutOpt = isLast ? "inherit" : "pipe";
+    let stderrOpt = "inherit";
+
+    if (cmd.stdoutFile) {
+      const fd = openFd(cmd.stdoutFile, cmd.stdoutAppend);
+      if (fd === null) {
+        console.error(`${cmd.command}: ${cmd.stdoutFile}: No such file or directory`);
+        closeOpenedFds();
+        startShell();
+        return;
+      }
+      stdoutOpt = fd;
+    }
+
+    if (cmd.stderrFile) {
+      const fd = openFd(cmd.stderrFile, cmd.stderrAppend);
+      if (fd === null) {
+        console.error(`${cmd.command}: ${cmd.stderrFile}: No such file or directory`);
+        closeOpenedFds();
+        startShell();
+        return;
+      }
+      stderrOpt = fd;
+    }
+
+    let child;
+    try {
+      child = spawn(cmd.executable, cmd.cmdArgs, {
+        stdio: [stdinOpt, stdoutOpt, stderrOpt],
+        argv0: cmd.command,
+      });
+    } catch {
+      console.error(`${cmd.command}: command not found`);
+      closeOpenedFds();
+      startShell();
+      return;
+    }
+
+    child.on("error", () => {
+      // Avoid crashing the shell on spawn/runtime errors for this stage.
+    });
+
+    if (!isFirst) {
+      const prevChild = children[i - 1];
+      // Guard both ends of the connection against EPIPE/ECONNRESET style
+      // errors (e.g. a downstream reader like `head` exiting early after
+      // it has read enough lines from a still-running `tail -f`).
+      prevChild.stdout.on("error", () => {});
+      if (child.stdin) child.stdin.on("error", () => {});
+      prevChild.stdout.pipe(child.stdin);
+    }
+
+    children.push(child);
+  }
+
+  const lastChild = children[children.length - 1];
+
+  lastChild.on("close", () => {
+    closeOpenedFds();
+    startShell();
+  });
+}
+
 startShell();
 
 rl.on("line", (input) => {
@@ -461,6 +600,22 @@ rl.on("line", (input) => {
 
   if (rawParts.length === 0) {
     startShell();
+    return;
+  }
+
+  // Detect a pipeline: split rawParts on literal "|" tokens. Each resulting
+  // segment is a self-contained command (with its own args/redirection).
+  const pipeSegments = [[]];
+  for (const token of rawParts) {
+    if (token === "|") {
+      pipeSegments.push([]);
+    } else {
+      pipeSegments[pipeSegments.length - 1].push(token);
+    }
+  }
+
+  if (pipeSegments.length > 1) {
+    runPipeline(pipeSegments);
     return;
   }
 
