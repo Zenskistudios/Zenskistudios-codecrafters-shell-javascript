@@ -183,6 +183,14 @@ function completer(line) {
 
     const result = spawnSync(scriptPath, [commandName, prefix, previousWord], {
       encoding: "utf8",
+      env: {
+        ...process.env,
+        COMP_LINE: line,
+        // Byte index of the cursor, which sits at the end of `line` (the
+        // completer is only invoked at the point of the TAB press). Use
+        // byte length, not string length, to handle multibyte characters.
+        COMP_POINT: String(Buffer.byteLength(line, "utf8")),
+      },
     });
 
     // spawnSync doesn't throw on exec failures (missing file, EACCES, bad
