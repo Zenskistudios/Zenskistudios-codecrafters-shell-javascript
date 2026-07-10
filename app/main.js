@@ -203,7 +203,7 @@ function completer(line) {
       const lines = (result.stdout || "").split("\n").filter((l) => l.length > 0);
 
       if (lines.length > 0) {
-        return resolveCompletion(lines.sort(), prefix, () => " ", true);
+        return resolveCompletion(lines.sort(), prefix);
       }
     }
   }
