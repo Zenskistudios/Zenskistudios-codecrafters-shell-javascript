@@ -10,9 +10,14 @@ const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs"];
 const completionSpecs = new Map();
 
 // Background jobs started with a trailing "&". Job numbers are assigned
-// sequentially starting from 1.
-let nextJobNumber = 1;
+// sequentially, but recycled: when the table is empty the next job is [1],
+// otherwise it's one more than the highest number currently in the table.
 const jobs = [];
+
+function getNextJobNumber() {
+  if (jobs.length === 0) return 1;
+  return Math.max(...jobs.map((job) => job.number)) + 1;
+}
 
 // Bash-style job-stack markers: the most recently created still-running job
 // is "current" (+), the one before that is "previous" (-), everything else
@@ -635,7 +640,7 @@ rl.on("line", (input) => {
           argv0: command,
         });
 
-        const jobNumber = nextJobNumber++;
+        const jobNumber = getNextJobNumber();
         const job = { number: jobNumber, pid: child.pid, command: input.trim(), status: "Running" };
         registerNewJob(job);
 
