@@ -576,9 +576,13 @@ rl.on("line", (input) => {
         const stderrFd = stderrFile ? fs.openSync(stderrFile, stderrMode) : "inherit";
 
         // Async spawn: don't wait for the child to exit, so the shell can
-        // print the next prompt immediately.
+        // print the next prompt immediately. Background jobs must NOT
+        // inherit the shell's own stdin — sharing the interactive tty/pipe
+        // with a detached child can delay exit detection and interfere
+        // with bytes the tester sends for the shell's next command, which
+        // is what was causing Done lines to surface a prompt cycle late.
         const child = spawn(executable, args, {
-          stdio: ["inherit", stdoutFd, stderrFd],
+          stdio: ["ignore", stdoutFd, stderrFd],
           argv0: command,
         });
 
