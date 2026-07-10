@@ -99,7 +99,7 @@ let lastAmbiguousLine = null;
 // getSuffix(hit) determines what to append after a single unambiguous match:
 // a space for a file/command, or a trailing slash (no space) for a directory.
 // Defaults to always appending a space (used for command-name completion).
-function resolveCompletion(hits, matchText, getSuffix = () => " ") {
+function resolveCompletion(hits, matchText, getSuffix = () => " ", skipLcp = false) {
   if (hits.length === 1) {
     lastAmbiguousLine = null;
     return [[hits[0] + getSuffix(hits[0])], matchText];
@@ -115,11 +115,15 @@ function resolveCompletion(hits, matchText, getSuffix = () => " ") {
   // Multiple matches. First see if they share a longer common prefix
   // than what's already typed — if so, complete up to that prefix
   // (no trailing space, since it's not necessarily a full match yet).
-  const lcp = longestCommonPrefix(hits);
+  // Completer-script candidates skip this step (not implemented yet for
+  // that source), going straight to the bell/list behavior below.
+  if (!skipLcp) {
+    const lcp = longestCommonPrefix(hits);
 
-  if (lcp.length > matchText.length) {
-    lastAmbiguousLine = null;
-    return [[lcp], matchText];
+    if (lcp.length > matchText.length) {
+      lastAmbiguousLine = null;
+      return [[lcp], matchText];
+    }
   }
 
   // No further common-prefix extension is possible: truly ambiguous.
@@ -198,8 +202,8 @@ function completer(line) {
     if (!result.error) {
       const lines = (result.stdout || "").split("\n").filter((l) => l.length > 0);
 
-      if (lines.length === 1) {
-        return resolveCompletion(lines, prefix);
+      if (lines.length > 0) {
+        return resolveCompletion(lines.sort(), prefix, () => " ", true);
       }
     }
   }
