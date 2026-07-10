@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const builtins = ["echo", "exit", "type", "pwd", "cd", "complete"];
+const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs"];
 
 // Registered completion specs from `complete -C <script> <command>`,
 // keyed by command name -> completer script path.
@@ -491,6 +491,13 @@ rl.on("line", (input) => {
       }
     }
 
+    startShell();
+    return;
+  }
+
+  if (command === "jobs") {
+    // Empty implementation for this stage: no background jobs are tracked
+    // yet, so there's nothing to list.
     startShell();
     return;
   }
