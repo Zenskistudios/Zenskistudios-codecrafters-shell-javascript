@@ -514,8 +514,15 @@ rl.on("line", (input) => {
   }
 
   if (command === "jobs") {
-    // Empty implementation for this stage: no background jobs are tracked
-    // yet, so there's nothing to list.
+    // Only list jobs that are still running; only one job is possible at
+    // this stage, so it's always the most recent one (marked with "+").
+    const runningJobs = jobs.filter((job) => job.status === "Running");
+
+    for (const job of runningJobs) {
+      const statusField = job.status.padEnd(24);
+      writeStdout(`[${job.number}]+  ${statusField}${job.command}`);
+    }
+
     startShell();
     return;
   }
