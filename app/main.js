@@ -18,7 +18,8 @@ const jobs = [];
 // is "current" (+), the one before that is "previous" (-), everything else
 // is unmarked. These are assigned at creation time and only shuffle when the
 // "+" job itself finishes — reaping the "-" job does NOT promote anything,
-// matching real bash semantics.
+// matching real bash semantics (as opposed to recomputing "top 2 by array
+// position" fresh on every display, which mis-promotes older blank jobs).
 let currentJob = null;
 let previousJob = null;
 
@@ -34,21 +35,10 @@ function registerNewJob(job) {
   jobs.push(job);
 }
 
-// Prints a job's "Done" line immediately (interrupting whatever the user is
-// currently typing), removes it from the table, and updates the +/- stack:
-// only promotes previousJob -> currentJob if the finished job WAS currentJob;
-// if it was previousJob, that slot simply goes blank (no promotion).
-function reportAndRemoveJob(job) {
-  const marker = markerFor(job);
-  const statusField = "Done".padEnd(24);
-  const displayCommand = job.command.replace(/\s*&$/, "");
-
-  process.stdout.write(`\n[${job.number}]${marker}  ${statusField}${displayCommand}\n`);
-  rl._refreshLine();
-
-  const idx = jobs.indexOf(job);
-  if (idx !== -1) jobs.splice(idx, 1);
-
+// Called when a job is reaped (removed from the table): updates the +/-
+// stack. Promotion only happens if the removed job WAS currentJob; removing
+// previousJob just clears that slot with no promotion, matching bash.
+function updateStackOnRemoval(job) {
   if (job === currentJob) {
     currentJob = previousJob;
     previousJob = null;
@@ -284,10 +274,36 @@ const rl = readline.createInterface({
   completer,
 });
 
-// Prints the prompt for the next command. Job completions are now reported
-// the instant they happen (see reportAndRemoveJob, called from each child's
-// "exit" handler), so there's nothing left to reap here — this just prompts.
+// Checks for background jobs that have finished, prints a "Done" line for
+// each (using the persistent +/- job-stack markers), then removes them from
+// the table. Shared by the jobs builtin and the automatic pre-prompt reap,
+// so a job's Done line is reported exactly once, whichever happens first.
+// Printed lazily (before the next prompt or inside `jobs`) rather than the
+// instant the process exits, matching bash's documented behavior: "the
+// notification is not printed at the exact moment it changes, but
+// immediately before printing a prompt."
+function reapDoneJobs() {
+  if (jobs.length === 0) return;
+
+  const doneJobs = jobs.filter((job) => job.status === "Done");
+
+  for (const job of doneJobs) {
+    const marker = markerFor(job);
+    const statusField = job.status.padEnd(24);
+    const displayCommand = job.command.replace(/\s*&$/, "");
+    console.log(`[${job.number}]${marker}  ${statusField}${displayCommand}`);
+
+    const idx = jobs.indexOf(job);
+    if (idx !== -1) jobs.splice(idx, 1);
+    updateStackOnRemoval(job);
+  }
+}
+
+// Prints the prompt for the next command. Reaps any background jobs that
+// have finished *before* printing the prompt, so completed-job "Done" lines
+// always appear between the previous command's output and the next "$ ".
 function startShell() {
+  reapDoneJobs();
   rl.prompt();
 }
 
@@ -566,8 +582,11 @@ rl.on("line", (input) => {
   }
 
   if (command === "jobs") {
-    // Finished jobs are already reported and removed the instant they exit
-    // (see reportAndRemoveJob), so everything still in the table is Running.
+    // Report and remove anything that finished since the last reap (either
+    // automatic, before the previous prompt, or right here) before listing
+    // what's left — which will only be Running jobs at this point.
+    reapDoneJobs();
+
     for (const job of jobs) {
       const statusField = "Running".padEnd(24);
       writeStdout(`[${job.number}]${markerFor(job)}  ${statusField}${job.command}`);
@@ -596,11 +615,11 @@ rl.on("line", (input) => {
         });
 
         const jobNumber = nextJobNumber++;
-        const job = { number: jobNumber, pid: child.pid, command: input.trim() };
+        const job = { number: jobNumber, pid: child.pid, command: input.trim(), status: "Running" };
         registerNewJob(job);
 
         child.on("exit", () => {
-          reportAndRemoveJob(job);
+          job.status = "Done";
         });
 
         console.log(`[${jobNumber}] ${child.pid}`);
