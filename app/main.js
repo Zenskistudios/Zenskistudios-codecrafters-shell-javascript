@@ -582,14 +582,24 @@ rl.on("line", (input) => {
   }
 
   if (command === "jobs") {
-    // Report and remove anything that finished since the last reap (either
-    // automatic, before the previous prompt, or right here) before listing
-    // what's left — which will only be Running jobs at this point.
-    reapDoneJobs();
-
+    // Print every job in job-number order, using each job's *current*
+    // status (Running or Done). This must happen in a single pass so a
+    // job that just finished is reported in its natural position instead
+    // of being grouped with other Done jobs ahead of still-Running ones.
     for (const job of jobs) {
-      const statusField = "Running".padEnd(24);
-      writeStdout(`[${job.number}]${markerFor(job)}  ${statusField}${job.command}`);
+      const statusField = job.status.padEnd(24);
+      const displayCommand =
+        job.status === "Done" ? job.command.replace(/\s*&$/, "") : job.command;
+      writeStdout(`[${job.number}]${markerFor(job)}  ${statusField}${displayCommand}`);
+    }
+
+    // Now that everything has been reported, remove any Done jobs from the
+    // table so they aren't shown (or reported) again.
+    const doneJobs = jobs.filter((job) => job.status === "Done");
+    for (const job of doneJobs) {
+      const idx = jobs.indexOf(job);
+      if (idx !== -1) jobs.splice(idx, 1);
+      updateStackOnRemoval(job);
     }
 
     startShell();
