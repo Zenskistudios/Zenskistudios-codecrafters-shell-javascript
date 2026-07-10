@@ -1,13 +1,18 @@
 const readline = require("readline");
 const fs = require("fs");
 const path = require("path");
-const { spawnSync } = require("child_process");
+const { spawnSync, spawn } = require("child_process");
 
 const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs"];
 
 // Registered completion specs from `complete -C <script> <command>`,
 // keyed by command name -> completer script path.
 const completionSpecs = new Map();
+
+// Background jobs started with a trailing "&". Job numbers are assigned
+// sequentially starting from 1.
+let nextJobNumber = 1;
+const jobs = [];
 
 // Find executable names in PATH whose name starts with the given prefix.
 // Handles PATH entries that point to nonexistent directories gracefully.
@@ -362,6 +367,19 @@ rl.on("line", (input) => {
     return;
   }
 
+  // A trailing "&" token means run this command in the background: strip it
+  // out before redirection/argument parsing proceeds as normal.
+  let isBackground = false;
+  if (rawParts[rawParts.length - 1] === "&") {
+    isBackground = true;
+    rawParts.pop();
+  }
+
+  if (rawParts.length === 0) {
+    startShell();
+    return;
+  }
+
   const { args: parts, stdoutFile, stdoutAppend, stderrFile, stderrAppend } = extractRedirection(rawParts);
 
   if (parts.length === 0) {
@@ -505,9 +523,40 @@ rl.on("line", (input) => {
   const executable = findExecutable(command);
 
   if (executable) {
+    const stdoutMode = stdoutAppend ? "a" : "w";
+    const stderrMode = stderrAppend ? "a" : "w";
+
+    if (isBackground) {
+      try {
+        const stdoutFd = stdoutFile ? fs.openSync(stdoutFile, stdoutMode) : "inherit";
+        const stderrFd = stderrFile ? fs.openSync(stderrFile, stderrMode) : "inherit";
+
+        // Async spawn: don't wait for the child to exit, so the shell can
+        // print the next prompt immediately.
+        const child = spawn(executable, args, {
+          stdio: ["inherit", stdoutFd, stderrFd],
+          argv0: command,
+        });
+
+        const jobNumber = nextJobNumber++;
+        jobs.push({ number: jobNumber, pid: child.pid, command: input.trim(), status: "Running" });
+
+        child.on("exit", () => {
+          const job = jobs.find((j) => j.pid === child.pid);
+          if (job) job.status = "Done";
+        });
+
+        console.log(`[${jobNumber}] ${child.pid}`);
+      } catch {
+        const badFile = stdoutFile || stderrFile;
+        console.error(`${command}: ${badFile}: No such file or directory`);
+      }
+
+      startShell();
+      return;
+    }
+
     try {
-      const stdoutMode = stdoutAppend ? "a" : "w";
-      const stderrMode = stderrAppend ? "a" : "w";
       const stdoutFd = stdoutFile ? fs.openSync(stdoutFile, stdoutMode) : "inherit";
       const stderrFd = stderrFile ? fs.openSync(stderrFile, stderrMode) : "inherit";
 
