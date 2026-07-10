@@ -36,8 +36,9 @@ function registerNewJob(job) {
 }
 
 // Called when a job is reaped (removed from the table): updates the +/-
-// stack. Promotion only happens if the removed job WAS currentJob; removing
-// previousJob just clears that slot with no promotion, matching bash.
+// stack. Whichever slot (current "+" or previous "-") the removed job
+// occupied gets refilled by promoting the next-most-recent remaining job
+// into that slot.
 function updateStackOnRemoval(job) {
   if (job === currentJob) {
     currentJob = previousJob;
@@ -49,7 +50,17 @@ function updateStackOnRemoval(job) {
       }
     }
   } else if (job === previousJob) {
+    // Symmetric to the currentJob case: promote the next-most-recent
+    // remaining job into the now-empty "-" slot, rather than leaving it
+    // blank. This matches the tester's expectation that removing either
+    // stack slot pulls the next job up.
     previousJob = null;
+    for (let i = jobs.length - 1; i >= 0; i--) {
+      if (jobs[i] !== currentJob) {
+        previousJob = jobs[i];
+        break;
+      }
+    }
   }
 }
 
