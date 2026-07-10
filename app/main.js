@@ -264,18 +264,8 @@ function reapDoneJobs() {
 }
 
 function startShell() {
-  // Defer to the next event-loop tick before reaping. A foreground command
-  // runs via the blocking spawnSync, which freezes the event loop for its
-  // duration; if a background job exits while that's happening, its 'exit'
-  // callback is queued by libuv but can't actually run until the current
-  // synchronous call stack unwinds. Reaping synchronously right here (in
-  // that same stack) would read a stale "Running" status. setImmediate lets
-  // any already-queued exit callbacks fire first, so reapDoneJobs() sees
-  // up-to-date job statuses.
-  setImmediate(() => {
-    reapDoneJobs();
-    rl.prompt();
-  });
+  reapDoneJobs();
+  rl.prompt();
 }
 
 function findExecutable(command) {
@@ -586,13 +576,9 @@ rl.on("line", (input) => {
         const stderrFd = stderrFile ? fs.openSync(stderrFile, stderrMode) : "inherit";
 
         // Async spawn: don't wait for the child to exit, so the shell can
-        // print the next prompt immediately. Background jobs must NOT
-        // inherit the shell's own stdin — sharing the interactive tty/pipe
-        // with a detached child can delay exit detection and interfere
-        // with bytes the tester sends for the shell's next command, which
-        // is what was causing Done lines to surface a prompt cycle late.
+        // print the next prompt immediately.
         const child = spawn(executable, args, {
-          stdio: ["ignore", stdoutFd, stderrFd],
+          stdio: ["inherit", stdoutFd, stderrFd],
           argv0: command,
         });
 
