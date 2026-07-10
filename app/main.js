@@ -162,7 +162,26 @@ function completer(line) {
 
   // Completing a filename argument: only look at the text after the last space.
   const prefix = line.slice(lastSpaceIndex + 1);
-  const fileHits = Array.from(findFilenameCompletions(prefix)).sort();
+
+  // If a completer script is registered for the command being typed, run it
+  // and use its output instead of filename completion.
+  const firstSpaceIndex = line.indexOf(" ");
+  const commandName = line.slice(0, firstSpaceIndex);
+
+  if (completionSpecs.has(commandName)) {
+    const scriptPath = completionSpecs.get(commandName);
+    const result = spawnSync(scriptPath, [], { encoding: "utf8" });
+
+    // spawnSync doesn't throw on exec failures (missing file, EACCES, bad
+    // shebang, etc.) — it sets result.error instead, so check explicitly.
+    if (!result.error) {
+      const lines = (result.stdout || "").split("\n").filter((l) => l.length > 0);
+
+      if (lines.length === 1) {
+        return resolveCompletion(lines, prefix);
+      }
+    }
+  }
 
   // Directories get a trailing "/" (no space) so the user can immediately
   // tab again into the next path segment; files get a trailing space.
@@ -173,6 +192,8 @@ function completer(line) {
       return " ";
     }
   };
+
+  const fileHits = Array.from(findFilenameCompletions(prefix)).sort();
 
   return resolveCompletion(fileHits, prefix, getSuffix);
 }
