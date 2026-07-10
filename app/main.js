@@ -14,6 +14,55 @@ const completionSpecs = new Map();
 let nextJobNumber = 1;
 const jobs = [];
 
+// Bash-style job-stack markers: the most recently created still-running job
+// is "current" (+), the one before that is "previous" (-), everything else
+// is unmarked. These are assigned at creation time and only shuffle when the
+// "+" job itself finishes — reaping the "-" job does NOT promote anything,
+// matching real bash semantics.
+let currentJob = null;
+let previousJob = null;
+
+function markerFor(job) {
+  if (job === currentJob) return "+";
+  if (job === previousJob) return "-";
+  return " ";
+}
+
+function registerNewJob(job) {
+  previousJob = currentJob;
+  currentJob = job;
+  jobs.push(job);
+}
+
+// Prints a job's "Done" line immediately (interrupting whatever the user is
+// currently typing), removes it from the table, and updates the +/- stack:
+// only promotes previousJob -> currentJob if the finished job WAS currentJob;
+// if it was previousJob, that slot simply goes blank (no promotion).
+function reportAndRemoveJob(job) {
+  const marker = markerFor(job);
+  const statusField = "Done".padEnd(24);
+  const displayCommand = job.command.replace(/\s*&$/, "");
+
+  process.stdout.write(`\n[${job.number}]${marker}  ${statusField}${displayCommand}\n`);
+  rl._refreshLine();
+
+  const idx = jobs.indexOf(job);
+  if (idx !== -1) jobs.splice(idx, 1);
+
+  if (job === currentJob) {
+    currentJob = previousJob;
+    previousJob = null;
+    for (let i = jobs.length - 1; i >= 0; i--) {
+      if (jobs[i] !== currentJob) {
+        previousJob = jobs[i];
+        break;
+      }
+    }
+  } else if (job === previousJob) {
+    previousJob = null;
+  }
+}
+
 // Find executable names in PATH whose name starts with the given prefix.
 // Handles PATH entries that point to nonexistent directories gracefully.
 function findExecutableCompletions(prefix) {
@@ -235,39 +284,10 @@ const rl = readline.createInterface({
   completer,
 });
 
-// Checks for background jobs that have finished, prints a "Done" line for
-// each (recalculating +/- markers against the current job list first), then
-// removes them from the table. Shared by the jobs builtin and the automatic
-// pre-prompt reap, so a job's Done line is reported exactly once, whichever
-// happens first.
-function reapDoneJobs() {
-  if (jobs.length === 0) return;
-
-  const mostRecentJob = jobs[jobs.length - 1];
-  const secondMostRecentJob = jobs[jobs.length - 2];
-
-  const doneJobs = jobs.filter((job) => job.status === "Done");
-
-  for (const job of doneJobs) {
-    let marker = " ";
-    if (job === mostRecentJob) marker = "+";
-    else if (job === secondMostRecentJob) marker = "-";
-
-    const statusField = job.status.padEnd(24);
-    const displayCommand = job.command.replace(/\s*&$/, "");
-    console.log(`[${job.number}]${marker}  ${statusField}${displayCommand}`);
-  }
-
-  for (let i = jobs.length - 1; i >= 0; i--) {
-    if (jobs[i].status === "Done") jobs.splice(i, 1);
-  }
-}
-
-// Prints the prompt for the next command. Reaps any background jobs that
-// have finished *before* printing the prompt, so completed-job "Done" lines
-// always appear between the previous command's output and the next "$ ".
+// Prints the prompt for the next command. Job completions are now reported
+// the instant they happen (see reportAndRemoveJob, called from each child's
+// "exit" handler), so there's nothing left to reap here — this just prompts.
 function startShell() {
-  reapDoneJobs();
   rl.prompt();
 }
 
@@ -546,21 +566,11 @@ rl.on("line", (input) => {
   }
 
   if (command === "jobs") {
-    // Report and remove anything that finished since the last reap (either
-    // automatic, before the previous prompt, or right here) before listing
-    // what's left — which will only be Running jobs at this point.
-    reapDoneJobs();
-
-    const mostRecentJob = jobs[jobs.length - 1];
-    const secondMostRecentJob = jobs[jobs.length - 2];
-
+    // Finished jobs are already reported and removed the instant they exit
+    // (see reportAndRemoveJob), so everything still in the table is Running.
     for (const job of jobs) {
-      let marker = " ";
-      if (job === mostRecentJob) marker = "+";
-      else if (job === secondMostRecentJob) marker = "-";
-
-      const statusField = job.status.padEnd(24);
-      writeStdout(`[${job.number}]${marker}  ${statusField}${job.command}`);
+      const statusField = "Running".padEnd(24);
+      writeStdout(`[${job.number}]${markerFor(job)}  ${statusField}${job.command}`);
     }
 
     startShell();
@@ -586,11 +596,11 @@ rl.on("line", (input) => {
         });
 
         const jobNumber = nextJobNumber++;
-        jobs.push({ number: jobNumber, pid: child.pid, command: input.trim(), status: "Running" });
+        const job = { number: jobNumber, pid: child.pid, command: input.trim() };
+        registerNewJob(job);
 
         child.on("exit", () => {
-          const job = jobs.find((j) => j.pid === child.pid);
-          if (job) job.status = "Done";
+          reportAndRemoveJob(job);
         });
 
         console.log(`[${jobNumber}] ${child.pid}`);
