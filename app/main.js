@@ -514,13 +514,21 @@ rl.on("line", (input) => {
   }
 
   if (command === "jobs") {
-    // Only list jobs that are still running; only one job is possible at
-    // this stage, so it's always the most recent one (marked with "+").
+    // Markers are based on overall recency (job number order), not just
+    // among the running ones being displayed: the most recently started
+    // job is "+", the one before that is "-", everything else is a space.
+    const mostRecentJob = jobs[jobs.length - 1];
+    const secondMostRecentJob = jobs[jobs.length - 2];
+
     const runningJobs = jobs.filter((job) => job.status === "Running");
 
     for (const job of runningJobs) {
+      let marker = " ";
+      if (job === mostRecentJob) marker = "+";
+      else if (job === secondMostRecentJob) marker = "-";
+
       const statusField = job.status.padEnd(24);
-      writeStdout(`[${job.number}]+  ${statusField}${job.command}`);
+      writeStdout(`[${job.number}]${marker}  ${statusField}${job.command}`);
     }
 
     startShell();
