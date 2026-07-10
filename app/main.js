@@ -175,14 +175,14 @@ function completer(line) {
   if (completionSpecs.has(commandName)) {
     const scriptPath = completionSpecs.get(commandName);
 
-    // Determine the word immediately before the one being completed (empty
-    // string if there isn't one), excluding the command name itself.
+    // Determine the word immediately before the one being completed. This
+    // includes the command name itself when it's the only preceding word
+    // (e.g. "git <TAB>" -> previous word is "git", not "").
     const textBeforeCurrentWord = line.slice(0, lastSpaceIndex);
     const wordsBeforeCurrentWord = textBeforeCurrentWord.split(/\s+/).filter(Boolean);
-    const argWordsBeforeCurrentWord = wordsBeforeCurrentWord.slice(1);
     const previousWord =
-      argWordsBeforeCurrentWord.length > 0
-        ? argWordsBeforeCurrentWord[argWordsBeforeCurrentWord.length - 1]
+      wordsBeforeCurrentWord.length > 0
+        ? wordsBeforeCurrentWord[wordsBeforeCurrentWord.length - 1]
         : "";
 
     const result = spawnSync(scriptPath, [commandName, prefix, previousWord], {
