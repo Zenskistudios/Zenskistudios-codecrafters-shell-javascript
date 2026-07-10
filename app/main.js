@@ -477,6 +477,10 @@ rl.on("line", (input) => {
       const scriptPath = args[1];
       const targetCommand = args[2];
       completionSpecs.set(targetCommand, scriptPath);
+    } else if (args[0] === "-r") {
+      const targetCommand = args[1];
+      // No-op (and no error) if nothing was registered for this command.
+      completionSpecs.delete(targetCommand);
     } else if (args[0] === "-p") {
       const target = args[1];
       if (completionSpecs.has(target)) {
