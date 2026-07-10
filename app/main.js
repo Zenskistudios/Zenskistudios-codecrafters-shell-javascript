@@ -264,8 +264,18 @@ function reapDoneJobs() {
 }
 
 function startShell() {
-  reapDoneJobs();
-  rl.prompt();
+  // Defer to the next event-loop tick before reaping. A foreground command
+  // runs via the blocking spawnSync, which freezes the event loop for its
+  // duration; if a background job exits while that's happening, its 'exit'
+  // callback is queued by libuv but can't actually run until the current
+  // synchronous call stack unwinds. Reaping synchronously right here (in
+  // that same stack) would read a stale "Running" status. setImmediate lets
+  // any already-queued exit callbacks fire first, so reapDoneJobs() sees
+  // up-to-date job statuses.
+  setImmediate(() => {
+    reapDoneJobs();
+    rl.prompt();
+  });
 }
 
 function findExecutable(command) {
