@@ -170,7 +170,20 @@ function completer(line) {
 
   if (completionSpecs.has(commandName)) {
     const scriptPath = completionSpecs.get(commandName);
-    const result = spawnSync(scriptPath, [], { encoding: "utf8" });
+
+    // Determine the word immediately before the one being completed (empty
+    // string if there isn't one), excluding the command name itself.
+    const textBeforeCurrentWord = line.slice(0, lastSpaceIndex);
+    const wordsBeforeCurrentWord = textBeforeCurrentWord.split(/\s+/).filter(Boolean);
+    const argWordsBeforeCurrentWord = wordsBeforeCurrentWord.slice(1);
+    const previousWord =
+      argWordsBeforeCurrentWord.length > 0
+        ? argWordsBeforeCurrentWord[argWordsBeforeCurrentWord.length - 1]
+        : "";
+
+    const result = spawnSync(scriptPath, [commandName, prefix, previousWord], {
+      encoding: "utf8",
+    });
 
     // spawnSync doesn't throw on exec failures (missing file, EACCES, bad
     // shebang, etc.) — it sets result.error instead, so check explicitly.
