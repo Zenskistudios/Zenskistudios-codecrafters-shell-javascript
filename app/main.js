@@ -235,7 +235,36 @@ const rl = readline.createInterface({
   completer,
 });
 
+// Checks for background jobs that have finished, prints a "Done" line for
+// each (recalculating +/- markers against the current job list first), then
+// removes them from the table. Shared by the jobs builtin and the automatic
+// pre-prompt reap, so a job's Done line is reported exactly once, whichever
+// happens first.
+function reapDoneJobs() {
+  if (jobs.length === 0) return;
+
+  const mostRecentJob = jobs[jobs.length - 1];
+  const secondMostRecentJob = jobs[jobs.length - 2];
+
+  const doneJobs = jobs.filter((job) => job.status === "Done");
+
+  for (const job of doneJobs) {
+    let marker = " ";
+    if (job === mostRecentJob) marker = "+";
+    else if (job === secondMostRecentJob) marker = "-";
+
+    const statusField = job.status.padEnd(24);
+    const displayCommand = job.command.replace(/\s*&$/, "");
+    console.log(`[${job.number}]${marker}  ${statusField}${displayCommand}`);
+  }
+
+  for (let i = jobs.length - 1; i >= 0; i--) {
+    if (jobs[i].status === "Done") jobs.splice(i, 1);
+  }
+}
+
 function startShell() {
+  reapDoneJobs();
   rl.prompt();
 }
 
@@ -514,9 +543,11 @@ rl.on("line", (input) => {
   }
 
   if (command === "jobs") {
-    // Markers are based on overall recency (job number order): the most
-    // recently started job is "+", the one before that is "-", everything
-    // else is a space. Compute this before any reaping below removes jobs.
+    // Report and remove anything that finished since the last reap (either
+    // automatic, before the previous prompt, or right here) before listing
+    // what's left — which will only be Running jobs at this point.
+    reapDoneJobs();
+
     const mostRecentJob = jobs[jobs.length - 1];
     const secondMostRecentJob = jobs[jobs.length - 2];
 
@@ -526,17 +557,7 @@ rl.on("line", (input) => {
       else if (job === secondMostRecentJob) marker = "-";
 
       const statusField = job.status.padEnd(24);
-      // Done jobs are shown without the trailing "&" that Running jobs keep.
-      const displayCommand =
-        job.status === "Done" ? job.command.replace(/\s*&$/, "") : job.command;
-
-      writeStdout(`[${job.number}]${marker}  ${statusField}${displayCommand}`);
-    }
-
-    // Reap: once a finished job has been reported, remove it so it doesn't
-    // appear in subsequent `jobs` calls.
-    for (let i = jobs.length - 1; i >= 0; i--) {
-      if (jobs[i].status === "Done") jobs.splice(i, 1);
+      writeStdout(`[${job.number}]${marker}  ${statusField}${job.command}`);
     }
 
     startShell();
