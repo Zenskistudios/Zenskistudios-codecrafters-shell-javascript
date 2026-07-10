@@ -514,21 +514,29 @@ rl.on("line", (input) => {
   }
 
   if (command === "jobs") {
-    // Markers are based on overall recency (job number order), not just
-    // among the running ones being displayed: the most recently started
-    // job is "+", the one before that is "-", everything else is a space.
+    // Markers are based on overall recency (job number order): the most
+    // recently started job is "+", the one before that is "-", everything
+    // else is a space. Compute this before any reaping below removes jobs.
     const mostRecentJob = jobs[jobs.length - 1];
     const secondMostRecentJob = jobs[jobs.length - 2];
 
-    const runningJobs = jobs.filter((job) => job.status === "Running");
-
-    for (const job of runningJobs) {
+    for (const job of jobs) {
       let marker = " ";
       if (job === mostRecentJob) marker = "+";
       else if (job === secondMostRecentJob) marker = "-";
 
       const statusField = job.status.padEnd(24);
-      writeStdout(`[${job.number}]${marker}  ${statusField}${job.command}`);
+      // Done jobs are shown without the trailing "&" that Running jobs keep.
+      const displayCommand =
+        job.status === "Done" ? job.command.replace(/\s*&$/, "") : job.command;
+
+      writeStdout(`[${job.number}]${marker}  ${statusField}${displayCommand}`);
+    }
+
+    // Reap: once a finished job has been reported, remove it so it doesn't
+    // appear in subsequent `jobs` calls.
+    for (let i = jobs.length - 1; i >= 0; i--) {
+      if (jobs[i].status === "Done") jobs.splice(i, 1);
     }
 
     startShell();
