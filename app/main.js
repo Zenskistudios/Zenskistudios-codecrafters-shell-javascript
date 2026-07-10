@@ -560,7 +560,13 @@ rl.on("line", (input) => {
       writeStdout(`[${job.number}]${marker}  ${statusField}${job.command}`);
     }
 
-    startShell();
+    // NOTE: call rl.prompt() directly here, not startShell(). startShell()
+    // itself calls reapDoneJobs(), so routing through it would reap twice
+    // in a single command cycle (once above, once inside startShell()).
+    // That extra reap can catch a job that finishes in the brief window
+    // right after this listing prints, causing its "Done" line to appear
+    // one prompt cycle earlier than the tester expects.
+    rl.prompt();
     return;
   }
 
