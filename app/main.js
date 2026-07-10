@@ -263,25 +263,12 @@ function reapDoneJobs() {
   }
 }
 
+// Prints the prompt for the next command. Reaps any background jobs that
+// have finished *before* printing the prompt, so completed-job "Done" lines
+// always appear between the previous command's output and the next "$ ".
 function startShell() {
   reapDoneJobs();
   rl.prompt();
-}
-
-// Waits for a child process to exit, resolving either way (normal exit or
-// spawn error). Used for FOREGROUND external commands so that we await
-// completion asynchronously instead of blocking the event loop the way
-// spawnSync does. Blocking the event loop (via spawnSync) prevents any
-// background job's "exit" event from being processed until the blocking
-// call returns — which delays Done-job detection by a full command cycle
-// if a background job happens to finish while a foreground command is
-// running. Using async spawn + awaiting its exit here keeps the event loop
-// free, so background job completions are detected at the correct time.
-function waitForExit(child) {
-  return new Promise((resolve) => {
-    child.on("exit", () => resolve());
-    child.on("error", () => resolve());
-  });
 }
 
 function findExecutable(command) {
@@ -404,7 +391,7 @@ function extractRedirection(parts) {
 
 startShell();
 
-rl.on("line", async (input) => {
+rl.on("line", (input) => {
   const rawParts = parseInput(input);
 
   if (rawParts.length === 0) {
@@ -576,13 +563,7 @@ rl.on("line", async (input) => {
       writeStdout(`[${job.number}]${marker}  ${statusField}${job.command}`);
     }
 
-    // NOTE: call rl.prompt() directly here, not startShell(). startShell()
-    // itself calls reapDoneJobs(), so routing through it would reap twice
-    // in a single command cycle (once above, once inside startShell()).
-    // That extra reap can catch a job that finishes in the brief window
-    // right after this listing prints, causing its "Done" line to appear
-    // one prompt cycle earlier than the tester expects.
-    rl.prompt();
+    startShell();
     return;
   }
 
@@ -626,24 +607,10 @@ rl.on("line", async (input) => {
       const stdoutFd = stdoutFile ? fs.openSync(stdoutFile, stdoutMode) : "inherit";
       const stderrFd = stderrFile ? fs.openSync(stderrFile, stderrMode) : "inherit";
 
-      // Use async spawn + await instead of spawnSync. spawnSync blocks
-      // Node's entire event loop for the duration of the foreground
-      // command, which prevents any background job's "exit" event from
-      // being processed until spawnSync returns — delaying Done-job
-      // detection by a full command cycle if a background job finishes
-      // mid-foreground-command. Awaiting an async spawn keeps the event
-      // loop free so background completions are caught at the right time.
-      const child = spawn(executable, args, {
+      spawnSync(executable, args, {
         stdio: ["inherit", stdoutFd, stderrFd],
         argv0: command,
       });
-
-      // Pause readline while we wait so a fast-typing tester/user can't
-      // have their next line processed out of order while this foreground
-      // command is still running.
-      rl.pause();
-      await waitForExit(child);
-      rl.resume();
 
       if (typeof stdoutFd === "number") fs.closeSync(stdoutFd);
       if (typeof stderrFd === "number") fs.closeSync(stderrFd);
