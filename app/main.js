@@ -41,6 +41,20 @@ function appendHistoryFromFile(filePath) {
   return null;
 }
 
+// Writes the full in-memory command history out to a file, one command per
+// line, with a trailing newline at EOF (overwrites any existing content,
+// creating the file if it doesn't exist yet). Returns null on success, or
+// an error message string if the write failed.
+function writeHistoryToFile(filePath) {
+  const content = commandHistory.length ? commandHistory.join("\n") + "\n" : "";
+  try {
+    fs.writeFileSync(filePath, content);
+  } catch {
+    return `${filePath}: No such file or directory`;
+  }
+  return null;
+}
+
 // Background jobs started with a trailing "&". Job numbers are assigned
 // sequentially, but recycled: when the table is empty the next job is [1],
 // otherwise it's one more than the highest number currently in the table.
@@ -570,6 +584,12 @@ function executeBuiltinCaptured(command, cmdArgs) {
         break;
       }
 
+      if (cmdArgs[0] === "-w") {
+        const errorMsg = writeHistoryToFile(cmdArgs[1]);
+        if (errorMsg) stderrLines.push(`history: ${errorMsg}`);
+        break;
+      }
+
       // Optional "history <n>" shows only the last n entries (still with
       // their true, original index numbers) — matches bash.
       const limitArg = cmdArgs[0] !== undefined ? Number(cmdArgs[0]) : NaN;
@@ -1009,6 +1029,13 @@ rl.on("line", (input) => {
   if (command === "history") {
     if (args[0] === "-r") {
       const errorMsg = appendHistoryFromFile(args[1]);
+      if (errorMsg) writeStderr(`history: ${errorMsg}`);
+      startShell();
+      return;
+    }
+
+    if (args[0] === "-w") {
+      const errorMsg = writeHistoryToFile(args[1]);
       if (errorMsg) writeStderr(`history: ${errorMsg}`);
       startShell();
       return;
