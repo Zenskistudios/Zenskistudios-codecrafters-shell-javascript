@@ -9,6 +9,9 @@ const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs", "hist
 // keyed by command name -> completer script path.
 const completionSpecs = new Map();
 
+// Shell variables set via `declare NAME=VALUE`, keyed by name.
+const shellVariables = new Map();
+
 // Command history, in execution order. Each entry is the raw line as typed
 // (matching bash, which stores the line verbatim — redirections, trailing
 // "&", etc. included — not the parsed/normalized form). 1-indexed when
@@ -633,7 +636,19 @@ function executeBuiltinCaptured(command, cmdArgs) {
     case "declare": {
       if (cmdArgs[0] === "-p") {
         const varName = cmdArgs[1];
-        stderrLines.push(`declare: ${varName}: not found`);
+        if (shellVariables.has(varName)) {
+          stdoutLines.push(`declare -- ${varName}="${shellVariables.get(varName)}"`);
+        } else {
+          stderrLines.push(`declare: ${varName}: not found`);
+        }
+        break;
+      }
+
+      for (const arg of cmdArgs) {
+        const eqIndex = arg.indexOf("=");
+        if (eqIndex !== -1) {
+          shellVariables.set(arg.slice(0, eqIndex), arg.slice(eqIndex + 1));
+        }
       }
       break;
     }
@@ -1109,7 +1124,20 @@ rl.on("line", (input) => {
   if (command === "declare") {
     if (args[0] === "-p") {
       const varName = args[1];
-      writeStderr(`declare: ${varName}: not found`);
+      if (shellVariables.has(varName)) {
+        writeStdout(`declare -- ${varName}="${shellVariables.get(varName)}"`);
+      } else {
+        writeStderr(`declare: ${varName}: not found`);
+      }
+      startShell();
+      return;
+    }
+
+    for (const arg of args) {
+      const eqIndex = arg.indexOf("=");
+      if (eqIndex !== -1) {
+        shellVariables.set(arg.slice(0, eqIndex), arg.slice(eqIndex + 1));
+      }
     }
 
     startShell();
