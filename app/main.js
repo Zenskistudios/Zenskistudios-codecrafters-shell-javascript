@@ -3,11 +3,24 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync, spawn } = require("child_process");
 
-const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs"];
+const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history"];
 
 // Registered completion specs from `complete -C <script> <command>`,
 // keyed by command name -> completer script path.
 const completionSpecs = new Map();
+
+// Command history, in execution order. Each entry is the raw line as typed
+// (matching bash, which stores the line verbatim — redirections, trailing
+// "&", etc. included — not the parsed/normalized form). 1-indexed when
+// displayed by the `history` builtin.
+const commandHistory = [];
+
+// Formats one history entry the way bash's `history` builtin does: the
+// 1-based index right-justified in a field of width 5, two spaces, then the
+// command text (e.g. "    1  echo hi").
+function formatHistoryEntry(index, command) {
+  return `${String(index).padStart(5)}  ${command}`;
+}
 
 // Background jobs started with a trailing "&". Job numbers are assigned
 // sequentially, but recycled: when the table is empty the next job is [1],
@@ -530,6 +543,21 @@ function executeBuiltinCaptured(command, cmdArgs) {
       }
       break;
     }
+
+    case "history": {
+      // Optional "history <n>" shows only the last n entries (still with
+      // their true, original index numbers) — matches bash.
+      const limitArg = cmdArgs[0] !== undefined ? Number(cmdArgs[0]) : NaN;
+      const startIndex =
+        Number.isInteger(limitArg) && limitArg >= 0
+          ? Math.max(0, commandHistory.length - limitArg)
+          : 0;
+
+      for (let i = startIndex; i < commandHistory.length; i++) {
+        stdoutLines.push(formatHistoryEntry(i + 1, commandHistory[i]));
+      }
+      break;
+    }
   }
 
   return { stdoutLines, stderrLines, exitRequested };
@@ -783,6 +811,14 @@ rl.on("line", (input) => {
     return;
   }
 
+  // Record the line in history exactly as typed (bash stores the verbatim
+  // input, before any redirection/pipe/background parsing) — including the
+  // "history" command itself.
+  const trimmedInput = input.trim();
+  if (trimmedInput.length > 0) {
+    commandHistory.push(trimmedInput);
+  }
+
   // A trailing "&" token means run this command in the background: strip it
   // out before redirection/argument parsing proceeds as normal.
   let isBackground = false;
@@ -939,6 +975,21 @@ rl.on("line", (input) => {
         // No completion specification registered for this command.
         writeStderr(`complete: ${target}: no completion specification`);
       }
+    }
+
+    startShell();
+    return;
+  }
+
+  if (command === "history") {
+    const limitArg = args[0] !== undefined ? Number(args[0]) : NaN;
+    const startIndex =
+      Number.isInteger(limitArg) && limitArg >= 0
+        ? Math.max(0, commandHistory.length - limitArg)
+        : 0;
+
+    for (let i = startIndex; i < commandHistory.length; i++) {
+      writeStdout(formatHistoryEntry(i + 1, commandHistory[i]));
     }
 
     startShell();
