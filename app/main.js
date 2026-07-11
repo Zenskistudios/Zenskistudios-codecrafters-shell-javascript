@@ -410,13 +410,27 @@ function findExecutable(command) {
   return null;
 }
 
-// If input[i] is '$' followed by a valid identifier (letter/underscore then
-// letters/digits/underscores), returns { value, nextIndex } where value is
-// the variable's current value (empty string if unset) and nextIndex is the
-// index just past the consumed name. Returns null if '$' isn't followed by
-// a valid identifier, in which case the '$' should be treated as a literal
-// character.
+// If input[i] is '$' followed by either a valid identifier or a braced
+// '{NAME}' form, returns { value, nextIndex } where value is the
+// variable's current value (empty string if unset) and nextIndex is the
+// index just past what was consumed (the name, or the closing '}').
+// Returns null if '$' isn't followed by either valid form, in which case
+// the '$' should be treated as a literal character.
 function expandVariableAt(input, i) {
+  // ${NAME} form: braces mark exactly where the name ends, so trailing
+  // text right after the closing brace is kept as literal characters
+  // rather than being swallowed into the name (e.g. "${FOO}bar").
+  if (input[i + 1] === "{") {
+    const closingIndex = input.indexOf("}", i + 2);
+    if (closingIndex === -1) {
+      return null;
+    }
+    const name = input.slice(i + 2, closingIndex);
+    const value = shellVariables.has(name) ? shellVariables.get(name) : "";
+    return { value, nextIndex: closingIndex + 1 };
+  }
+
+  // Plain $NAME form.
   let j = i + 1;
   if (j >= input.length || !/[A-Za-z_]/.test(input[j])) {
     return null;
