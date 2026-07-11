@@ -647,7 +647,12 @@ function executeBuiltinCaptured(command, cmdArgs) {
       for (const arg of cmdArgs) {
         const eqIndex = arg.indexOf("=");
         if (eqIndex !== -1) {
-          shellVariables.set(arg.slice(0, eqIndex), arg.slice(eqIndex + 1));
+          const name = arg.slice(0, eqIndex);
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+            stderrLines.push(`declare: \`${arg}': not a valid identifier`);
+            continue;
+          }
+          shellVariables.set(name, arg.slice(eqIndex + 1));
         }
       }
       break;
@@ -1136,7 +1141,12 @@ rl.on("line", (input) => {
     for (const arg of args) {
       const eqIndex = arg.indexOf("=");
       if (eqIndex !== -1) {
-        shellVariables.set(arg.slice(0, eqIndex), arg.slice(eqIndex + 1));
+        const name = arg.slice(0, eqIndex);
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+          writeStderr(`declare: \`${arg}': not a valid identifier`);
+          continue;
+        }
+        shellVariables.set(name, arg.slice(eqIndex + 1));
       }
     }
 
