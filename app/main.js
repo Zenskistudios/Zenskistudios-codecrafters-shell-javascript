@@ -873,6 +873,16 @@ function runPipeline(segments) {
   });
 }
 
+// Load history from HISTFILE (if set) into memory on startup. Errors (e.g.
+// the file doesn't exist yet) are ignored silently — matching bash, which
+// doesn't complain about a missing/unset HISTFILE at launch. The append
+// cursor is advanced past these loaded entries so a later `history -a`
+// only writes out what's typed in this session, not what was just loaded.
+if (process.env.HISTFILE) {
+  appendHistoryFromFile(process.env.HISTFILE);
+  historyAppendCursor = commandHistory.length;
+}
+
 startShell();
 
 rl.on("line", (input) => {
