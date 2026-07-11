@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync, spawn } = require("child_process");
 
-const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history"];
+const builtins = ["echo", "exit", "type", "pwd", "cd", "complete", "jobs", "history", "declare"];
 
 // Registered completion specs from `complete -C <script> <command>`,
 // keyed by command name -> completer script path.
