@@ -441,35 +441,143 @@ function extractRedirection(parts) {
   return { args, stdoutFile, stdoutAppend, stderrFile, stderrAppend };
 }
 
-// Executes a pipeline of two or more external commands, connecting each
-// command's stdout to the next command's stdin with a real (streaming)
-// pipe. Uses `spawn` rather than `spawnSync` for every stage so that
-// long-lived producers (e.g. `tail -f`) can keep streaming output through
-// the pipe while downstream consumers (e.g. `head`) read it live, instead
-// of blocking the event loop until the whole pipeline finishes.
+// Executes a builtin command's logic (including any real side effects, like
+// cd's directory change or complete/jobs table mutations) but CAPTURES its
+// stdout/stderr as strings instead of writing them directly. This lets
+// runPipeline() decide where that output actually goes — to the terminal,
+// to a redirection file, or down the pipe into the next stage's stdin —
+// which a plain console.log() can't do.
+// Returns { stdoutLines, stderrLines, exitRequested }.
+function executeBuiltinCaptured(command, cmdArgs) {
+  const stdoutLines = [];
+  const stderrLines = [];
+  let exitRequested = false;
+
+  switch (command) {
+    case "exit": {
+      exitRequested = true;
+      break;
+    }
+
+    case "echo": {
+      stdoutLines.push(cmdArgs.join(" "));
+      break;
+    }
+
+    case "pwd": {
+      stdoutLines.push(process.cwd());
+      break;
+    }
+
+    case "cd": {
+      let target = cmdArgs[0] === undefined ? process.env.HOME : cmdArgs[0];
+      if (target === "~") {
+        target = process.env.HOME;
+      } else if (target.startsWith("~/")) {
+        target = path.join(process.env.HOME, target.slice(2));
+      }
+      try {
+        process.chdir(target);
+      } catch {
+        stderrLines.push(`cd: ${cmdArgs[0]}: No such file or directory`);
+      }
+      break;
+    }
+
+    case "type": {
+      const cmd = cmdArgs[0];
+      if (builtins.includes(cmd)) {
+        stdoutLines.push(`${cmd} is a shell builtin`);
+      } else {
+        const executable = findExecutable(cmd);
+        if (executable) {
+          stdoutLines.push(`${cmd} is ${executable}`);
+        } else {
+          stderrLines.push(`${cmd}: not found`);
+        }
+      }
+      break;
+    }
+
+    case "complete": {
+      if (cmdArgs[0] === "-C") {
+        completionSpecs.set(cmdArgs[2], cmdArgs[1]);
+      } else if (cmdArgs[0] === "-r") {
+        completionSpecs.delete(cmdArgs[1]);
+      } else if (cmdArgs[0] === "-p") {
+        const target = cmdArgs[1];
+        if (completionSpecs.has(target)) {
+          stdoutLines.push(`complete -C '${completionSpecs.get(target)}' ${target}`);
+        } else {
+          stderrLines.push(`complete: ${target}: no completion specification`);
+        }
+      }
+      break;
+    }
+
+    case "jobs": {
+      for (const job of jobs) {
+        const statusField = job.status.padEnd(24);
+        const displayCommand = job.status === "Done" ? job.command.replace(/\s*&$/, "") : job.command;
+        stdoutLines.push(`[${job.number}]${markerFor(job)}  ${statusField}${displayCommand}`);
+      }
+
+      const doneJobs = jobs.filter((job) => job.status === "Done");
+      for (const job of doneJobs) {
+        const idx = jobs.indexOf(job);
+        if (idx !== -1) jobs.splice(idx, 1);
+        updateStackOnRemoval(job);
+      }
+      break;
+    }
+  }
+
+  return { stdoutLines, stderrLines, exitRequested };
+}
+
+// Executes a pipeline of two or more commands, connecting each command's
+// stdout to the next command's stdin. Any stage may be an external program
+// OR a shell builtin (echo, type, pwd, cd, complete, jobs, exit) — builtins
+// run in-process (no fork/exec) but still participate correctly in the
+// pipeline's stdin/stdout wiring:
+//   - A builtin's captured stdout is forwarded as the next stage's stdin
+//     when the builtin isn't the last stage.
+//   - A builtin's own redirection (`>`, `>>`, etc.) still wins over piping,
+//     matching how external stages behave.
+//   - None of our builtins read from stdin, so when a builtin follows an
+//     external command, that command's stdout is drained/ignored rather
+//     than read — its output must NOT leak to the terminal.
+//   - stderr from a builtin is never sent down the pipe (only stdout is
+//     piped, matching bash); it goes to its own redirection or the
+//     terminal, same as an external stage's inherited stderr.
 //
-// Each segment's own redirection (`>`, `>>`, `2>`, etc.) is honored
-// independently: if a segment specifies a file for a stream, that file
-// wins over the pipe connection for that stream (matching bash, where the
-// last redirection/connection for a given fd applies). Otherwise the first
-// command's stdin is inherited from the shell, the last command's stdout is
-// inherited, and every other stream in between flows through pipes.
-//
-// The shell only waits on the LAST command's `close` event before printing
-// the next prompt — mirroring real bash, where `cmd1 | cmd2` returns to the
-// prompt as soon as `cmd2` (the foreground process group's tail) finishes,
-// even if `cmd1` lingers momentarily until it gets SIGPIPE'd by the kernel.
+// External-to-external stages still use real (streaming) `spawn` pipes, so
+// long-lived producers (e.g. `tail -f`) keep streaming through the pipeline
+// exactly as before.
 function runPipeline(segments) {
-  const parsedCommands = segments.map((segment) => extractRedirection(segment));
+  const parsedSegments = segments.map((segment) => extractRedirection(segment));
 
   const resolved = [];
-  for (const parsed of parsedCommands) {
+  for (const parsed of parsedSegments) {
     const cmdName = parsed.args[0];
 
     if (!cmdName) {
       // Empty segment (e.g. stray "||" or trailing "|"); nothing to run.
       startShell();
       return;
+    }
+
+    if (builtins.includes(cmdName)) {
+      resolved.push({
+        type: "builtin",
+        command: cmdName,
+        cmdArgs: parsed.args.slice(1),
+        stdoutFile: parsed.stdoutFile,
+        stdoutAppend: parsed.stdoutAppend,
+        stderrFile: parsed.stderrFile,
+        stderrAppend: parsed.stderrAppend,
+      });
+      continue;
     }
 
     const executable = findExecutable(cmdName);
@@ -480,10 +588,14 @@ function runPipeline(segments) {
     }
 
     resolved.push({
-      ...parsed,
+      type: "external",
       command: cmdName,
       executable,
       cmdArgs: parsed.args.slice(1),
+      stdoutFile: parsed.stdoutFile,
+      stdoutAppend: parsed.stdoutAppend,
+      stderrFile: parsed.stderrFile,
+      stderrAppend: parsed.stderrAppend,
     });
   }
 
@@ -509,21 +621,65 @@ function runPipeline(segments) {
     }
   }
 
-  const children = [];
+  const children = []; // external child processes, in the order they were spawned
+  let pendingInput = null; // string captured from a builtin, to feed the next external stage's stdin
+  let prevExternalStdout = null; // previous external stage's stdout stream, when not yet consumed
 
   for (let i = 0; i < resolved.length; i++) {
-    const cmd = resolved[i];
+    const stage = resolved[i];
     const isFirst = i === 0;
     const isLast = i === resolved.length - 1;
 
+    if (stage.type === "builtin") {
+      // If the previous stage was external and its stdout was never wired
+      // anywhere (because this builtin doesn't read stdin), drain it so
+      // that process doesn't stall trying to write into a full pipe buffer.
+      if (prevExternalStdout) {
+        prevExternalStdout.resume();
+        prevExternalStdout = null;
+      }
+      pendingInput = null;
+
+      const { stdoutLines, stderrLines, exitRequested } = executeBuiltinCaptured(stage.command, stage.cmdArgs);
+      const stdoutText = stdoutLines.length ? stdoutLines.join("\n") + "\n" : "";
+      const stderrText = stderrLines.length ? stderrLines.join("\n") + "\n" : "";
+
+      // stderr never travels down the pipe — only stdout does.
+      if (stage.stderrFile) {
+        const fd = openFd(stage.stderrFile, stage.stderrAppend);
+        if (fd !== null && stderrText) fs.writeSync(fd, stderrText);
+      } else if (stderrText) {
+        process.stderr.write(stderrText);
+      }
+
+      if (stage.stdoutFile) {
+        const fd = openFd(stage.stdoutFile, stage.stdoutAppend);
+        if (fd !== null && stdoutText) fs.writeSync(fd, stdoutText);
+      } else if (isLast) {
+        if (stdoutText) process.stdout.write(stdoutText);
+      } else {
+        // Forward this builtin's stdout as the next stage's stdin.
+        pendingInput = stdoutText;
+      }
+
+      if (exitRequested) {
+        closeOpenedFds();
+        rl.close();
+        return;
+      }
+
+      continue;
+    }
+
+    // External stage
     let stdinOpt = isFirst ? "inherit" : "pipe";
     let stdoutOpt = isLast ? "inherit" : "pipe";
     let stderrOpt = "inherit";
 
-    if (cmd.stdoutFile) {
-      const fd = openFd(cmd.stdoutFile, cmd.stdoutAppend);
+    if (stage.stdoutFile) {
+      const fd = openFd(stage.stdoutFile, stage.stdoutAppend);
       if (fd === null) {
-        console.error(`${cmd.command}: ${cmd.stdoutFile}: No such file or directory`);
+        console.error(`${stage.command}: ${stage.stdoutFile}: No such file or directory`);
         closeOpenedFds();
         startShell();
         return;
@@ -531,10 +687,10 @@ function runPipeline(segments) {
       stdoutOpt = fd;
     }
 
-    if (cmd.stderrFile) {
-      const fd = openFd(cmd.stderrFile, cmd.stderrAppend);
+    if (stage.stderrFile) {
+      const fd = openFd(stage.stderrFile, stage.stderrAppend);
       if (fd === null) {
-        console.error(`${cmd.command}: ${cmd.stderrFile}: No such file or directory`);
+        console.error(`${stage.command}: ${stage.stderrFile}: No such file or directory`);
         closeOpenedFds();
         startShell();
         return;
@@ -544,12 +700,12 @@ function runPipeline(segments) {
 
     let child;
     try {
-      child = spawn(cmd.executable, cmd.cmdArgs, {
+      child = spawn(stage.executable, stage.cmdArgs, {
         stdio: [stdinOpt, stdoutOpt, stderrOpt],
-        argv0: cmd.command,
+        argv0: stage.command,
       });
     } catch {
-      console.error(`${cmd.command}: command not found`);
+      console.error(`${stage.command}: command not found`);
       closeOpenedFds();
       startShell();
       return;
@@ -560,20 +716,57 @@ function runPipeline(segments) {
     });
 
     if (!isFirst) {
-      const prevChild = children[i - 1];
-      // Guard both ends of the connection against EPIPE/ECONNRESET style
-      // errors (e.g. a downstream reader like `head` exiting early after
-      // it has read enough lines from a still-running `tail -f`).
-      prevChild.stdout.on("error", () => {});
-      if (child.stdin) child.stdin.on("error", () => {});
-      prevChild.stdout.pipe(child.stdin);
+      if (prevExternalStdout) {
+        prevExternalStdout.on("error", () => {});
+        if (child.stdin) child.stdin.on("error", () => {});
+        prevExternalStdout.pipe(child.stdin);
+        prevExternalStdout = null;
+      } else if (pendingInput !== null) {
+        // Previous stage was a builtin: feed its captured output in, then
+        // close stdin so this stage sees EOF (it isn't a streaming source).
+        if (child.stdin) {
+          child.stdin.on("error", () => {});
+          child.stdin.write(pendingInput);
+          child.stdin.end();
+        }
+        pendingInput = null;
+      } else if (child.stdin) {
+        // No upstream data at all — close stdin so this stage doesn't hang
+        // waiting for input that will never come.
+        child.stdin.end();
+      }
     }
 
     children.push(child);
+    prevExternalStdout = isLast ? null : child.stdout;
   }
 
-  const lastChild = children[children.length - 1];
+  const lastResolved = resolved[resolved.length - 1];
 
+  if (lastResolved.type === "builtin") {
+    // The builtin already ran synchronously and wrote its output above.
+    // If any external stage ran earlier in the pipeline, wait for the most
+    // recently spawned one to close before returning to the prompt (mirrors
+    // the external-only case below); otherwise there's nothing left to wait
+    // on.
+    if (children.length > 0) {
+      const lastChild = children[children.length - 1];
+      lastChild.on("close", () => {
+        closeOpenedFds();
+        startShell();
+      });
+    } else {
+      closeOpenedFds();
+      startShell();
+    }
+    return;
+  }
+
+  // Last stage is external: only wait on IT before printing the next
+  // prompt — mirroring real bash, where `cmd1 | cmd2` returns to the prompt
+  // as soon as `cmd2` (the foreground process group's tail) finishes, even
+  // if `cmd1` lingers momentarily until it gets SIGPIPE'd by the kernel.
+  const lastChild = children[children.length - 1];
   lastChild.on("close", () => {
     closeOpenedFds();
     startShell();
