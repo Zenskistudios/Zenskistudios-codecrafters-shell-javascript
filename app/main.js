@@ -410,6 +410,27 @@ function findExecutable(command) {
   return null;
 }
 
+// If input[i] is '$' followed by a valid identifier (letter/underscore then
+// letters/digits/underscores), returns { value, nextIndex } where value is
+// the variable's current value (empty string if unset) and nextIndex is the
+// index just past the consumed name. Returns null if '$' isn't followed by
+// a valid identifier, in which case the '$' should be treated as a literal
+// character.
+function expandVariableAt(input, i) {
+  let j = i + 1;
+  if (j >= input.length || !/[A-Za-z_]/.test(input[j])) {
+    return null;
+  }
+  let name = input[j];
+  j++;
+  while (j < input.length && /[A-Za-z0-9_]/.test(input[j])) {
+    name += input[j];
+    j++;
+  }
+  const value = shellVariables.has(name) ? shellVariables.get(name) : "";
+  return { value, nextIndex: j };
+}
+
 function parseInput(input) {
   const tokens = [];
   let current = "";
@@ -435,6 +456,14 @@ function parseInput(input) {
       } else if (char === "\\" && i + 1 < input.length && ['"', "\\", "$", "`"].includes(input[i + 1])) {
         current += input[i + 1];
         i++;
+      } else if (char === "$") {
+        const expansion = expandVariableAt(input, i);
+        if (expansion) {
+          current += expansion.value;
+          i = expansion.nextIndex - 1;
+        } else {
+          current += char;
+        }
       } else {
         current += char;
       }
@@ -455,6 +484,15 @@ function parseInput(input) {
       tokenStarted = true;
     } else if (char === '"') {
       inDoubleQuote = true;
+      tokenStarted = true;
+    } else if (char === "$") {
+      const expansion = expandVariableAt(input, i);
+      if (expansion) {
+        current += expansion.value;
+        i = expansion.nextIndex - 1;
+      } else {
+        current += char;
+      }
       tokenStarted = true;
     } else if (/\s/.test(char)) {
       if (tokenStarted) {
