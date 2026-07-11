@@ -55,6 +55,27 @@ function writeHistoryToFile(filePath) {
   return null;
 }
 
+// Tracks how many commandHistory entries have already been written to disk
+// via `history -a`, session-wide (not per-file, matching real bash) — so
+// repeated `-a` calls only append what's new since the last one.
+let historyAppendCursor = 0;
+
+// Appends only the commandHistory entries recorded since the last
+// `history -a` call to a file, one per line, creating the file if it
+// doesn't exist. Returns null on success, or an error message string if
+// the write failed.
+function appendNewHistoryToFile(filePath) {
+  const newEntries = commandHistory.slice(historyAppendCursor);
+  const content = newEntries.length ? newEntries.join("\n") + "\n" : "";
+  try {
+    fs.appendFileSync(filePath, content);
+  } catch {
+    return `${filePath}: No such file or directory`;
+  }
+  historyAppendCursor = commandHistory.length;
+  return null;
+}
+
 // Background jobs started with a trailing "&". Job numbers are assigned
 // sequentially, but recycled: when the table is empty the next job is [1],
 // otherwise it's one more than the highest number currently in the table.
@@ -590,6 +611,12 @@ function executeBuiltinCaptured(command, cmdArgs) {
         break;
       }
 
+      if (cmdArgs[0] === "-a") {
+        const errorMsg = appendNewHistoryToFile(cmdArgs[1]);
+        if (errorMsg) stderrLines.push(`history: ${errorMsg}`);
+        break;
+      }
+
       // Optional "history <n>" shows only the last n entries (still with
       // their true, original index numbers) — matches bash.
       const limitArg = cmdArgs[0] !== undefined ? Number(cmdArgs[0]) : NaN;
@@ -1036,6 +1063,13 @@ rl.on("line", (input) => {
 
     if (args[0] === "-w") {
       const errorMsg = writeHistoryToFile(args[1]);
+      if (errorMsg) writeStderr(`history: ${errorMsg}`);
+      startShell();
+      return;
+    }
+
+    if (args[0] === "-a") {
+      const errorMsg = appendNewHistoryToFile(args[1]);
       if (errorMsg) writeStderr(`history: ${errorMsg}`);
       startShell();
       return;
