@@ -504,10 +504,20 @@ function parseInput(input) {
       if (expansion) {
         current += expansion.value;
         i = expansion.nextIndex - 1;
+        // An unquoted expansion that evaluates to "" contributes nothing on
+        // its own — if the whole word turns out to be just that (no other
+        // literal characters end up in `current`), it must be dropped
+        // entirely rather than producing an empty argument. So only mark
+        // the word as "real" here when the expansion actually produced
+        // something; any literal characters elsewhere in the word will set
+        // tokenStarted through their own branch regardless.
+        if (expansion.value.length > 0) {
+          tokenStarted = true;
+        }
       } else {
         current += char;
+        tokenStarted = true;
       }
-      tokenStarted = true;
     } else if (/\s/.test(char)) {
       if (tokenStarted) {
         tokens.push(current);
