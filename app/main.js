@@ -22,6 +22,25 @@ function formatHistoryEntry(index, command) {
   return `${String(index).padStart(5)}  ${command}`;
 }
 
+// Reads lines from a history file and appends them (skipping blank lines,
+// e.g. a trailing newline at EOF) to the in-memory command history, in
+// file order. Returns null on success, or an error message string if the
+// file couldn't be read.
+function appendHistoryFromFile(filePath) {
+  let content;
+  try {
+    content = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return `${filePath}: No such file or directory`;
+  }
+
+  const lines = content.split("\n").filter((line) => line.trim().length > 0);
+  for (const line of lines) {
+    commandHistory.push(line);
+  }
+  return null;
+}
+
 // Background jobs started with a trailing "&". Job numbers are assigned
 // sequentially, but recycled: when the table is empty the next job is [1],
 // otherwise it's one more than the highest number currently in the table.
@@ -545,6 +564,12 @@ function executeBuiltinCaptured(command, cmdArgs) {
     }
 
     case "history": {
+      if (cmdArgs[0] === "-r") {
+        const errorMsg = appendHistoryFromFile(cmdArgs[1]);
+        if (errorMsg) stderrLines.push(`history: ${errorMsg}`);
+        break;
+      }
+
       // Optional "history <n>" shows only the last n entries (still with
       // their true, original index numbers) — matches bash.
       const limitArg = cmdArgs[0] !== undefined ? Number(cmdArgs[0]) : NaN;
@@ -982,6 +1007,13 @@ rl.on("line", (input) => {
   }
 
   if (command === "history") {
+    if (args[0] === "-r") {
+      const errorMsg = appendHistoryFromFile(args[1]);
+      if (errorMsg) writeStderr(`history: ${errorMsg}`);
+      startShell();
+      return;
+    }
+
     const limitArg = args[0] !== undefined ? Number(args[0]) : NaN;
     const startIndex =
       Number.isInteger(limitArg) && limitArg >= 0
