@@ -630,6 +630,13 @@ function executeBuiltinCaptured(command, cmdArgs) {
       }
       break;
     }
+    case "declare": {
+      if (cmdArgs[0] === "-p") {
+        const varName = cmdArgs[1];
+        stderrLines.push(`declare: ${varName}: not found`);
+      }
+      break;
+    }
   }
 
   return { stdoutLines, stderrLines, exitRequested };
@@ -1093,6 +1100,16 @@ rl.on("line", (input) => {
 
     for (let i = startIndex; i < commandHistory.length; i++) {
       writeStdout(formatHistoryEntry(i + 1, commandHistory[i]));
+    }
+
+    startShell();
+    return;
+  }
+
+  if (command === "declare") {
+    if (args[0] === "-p") {
+      const varName = args[1];
+      writeStderr(`declare: ${varName}: not found`);
     }
 
     startShell();
