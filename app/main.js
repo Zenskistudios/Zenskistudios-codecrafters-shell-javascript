@@ -1183,5 +1183,13 @@ rl.on("line", (input) => {
 });
 
 rl.on("close", () => {
+  // Save the full in-memory history back to HISTFILE (if set) whenever the
+  // shell exits — whether via the `exit` builtin or the readline interface
+  // closing on its own (e.g. Ctrl+D/EOF on stdin). This overwrites the
+  // whole file with the current history, matching bash's default
+  // save-on-exit behavior (same semantics as `history -w`).
+  if (process.env.HISTFILE) {
+    writeHistoryToFile(process.env.HISTFILE);
+  }
   process.exit(0);
 });
